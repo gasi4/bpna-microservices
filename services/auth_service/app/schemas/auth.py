@@ -14,3 +14,4 @@ class TokenResponse(BaseModel):
 class TokenUser(BaseModel):
     user_id: int
     username: str | None = None
+    role: str = "operator"

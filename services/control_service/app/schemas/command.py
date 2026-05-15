@@ -24,10 +24,12 @@ class CommandType(str, Enum):
 
 
 class CommandCreate(BaseModel):
+    device_id: str = "bpna-01"
     command: CommandType
 
 
 class CommandResponse(BaseModel):
     success: bool
     command: str
+    device_id: str
     message: str

@@ -21,7 +21,12 @@ def create_access_token(user: User) -> str:
     expire = datetime.now(timezone.utc) + timedelta(
         minutes=settings.access_token_expire_minutes
     )
-    payload = {"sub": str(user.id), "username": user.username, "exp": expire}
+    payload = {
+        "sub": str(user.id),
+        "username": user.username,
+        "role": user.role,
+        "exp": expire,
+    }
     return jwt.encode(payload, settings.secret_key, algorithm=settings.jwt_algorithm)
 
 
@@ -45,4 +50,8 @@ def decode_token(token: str) -> TokenUser:
             detail="Invalid token subject",
         )
 
-    return TokenUser(user_id=int(user_id), username=payload.get("username"))
+    return TokenUser(
+        user_id=int(user_id),
+        username=payload.get("username"),
+        role=payload.get("role") or "operator",
+    )

@@ -29,3 +29,13 @@ async def validate(authorization: str | None = Header(default=None)):
             detail="Bearer token is required",
         )
     return decode_token(authorization.split(" ", 1)[1])
+
+
+@router.get("/me", response_model=TokenUser)
+async def me(authorization: str | None = Header(default=None)):
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Bearer token is required",
+        )
+    return decode_token(authorization.split(" ", 1)[1])

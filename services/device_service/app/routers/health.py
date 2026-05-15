@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.services.state import device_state
+from app.services import state
 
 
 router = APIRouter()
@@ -8,4 +8,5 @@ router = APIRouter()
 
 @router.get("/health")
 async def health():
-    return {"status": "ok", "service": "device", "connected": device_state["connected"]}
+    connected = sum(1 for item in state.device_states.values() if item.get("connected"))
+    return {"status": "ok", "service": "device", "connected_devices": connected}
