@@ -4,6 +4,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from urllib.parse import quote_plus
 
 ROOT = Path('/opt/bpna')
 SERVICES_DIR = ROOT / 'services'
@@ -12,6 +13,7 @@ SERVICES_DIR = ROOT / 'services'
 def normalize_database_url(url: str | None) -> str | None:
     if not url:
         return url
+    url = url.strip().strip('"').strip("'")
     if url.startswith('postgresql+asyncpg://'):
         return url
     if url.startswith('postgres://'):
@@ -21,11 +23,32 @@ def normalize_database_url(url: str | None) -> str | None:
     return url
 
 
+def derive_database_url(env: dict[str, str]) -> str | None:
+    database_url = normalize_database_url(env.get('DATABASE_URL'))
+    if database_url and '${{' not in database_url and '}}' not in database_url:
+        return database_url
+
+    pg_host = env.get('PGHOST')
+    pg_port = env.get('PGPORT', '5432')
+    pg_user = env.get('PGUSER')
+    pg_password = env.get('PGPASSWORD')
+    pg_database = env.get('PGDATABASE')
+
+    if all([pg_host, pg_user, pg_password, pg_database]):
+        return (
+            'postgresql+asyncpg://'
+            f'{quote_plus(pg_user)}:{quote_plus(pg_password)}'
+            f'@{pg_host}:{pg_port}/{quote_plus(pg_database)}'
+        )
+
+    return database_url
+
+
 def build_env(port: int, public: bool = False) -> dict[str, str]:
     env = os.environ.copy()
     env['PORT'] = str(port)
     env['HOSTNAME'] = '0.0.0.0' if public else '127.0.0.1'
-    database_url = normalize_database_url(env.get('DATABASE_URL'))
+    database_url = derive_database_url(env)
     if database_url:
         env['DATABASE_URL'] = database_url
     model_path = ROOT / 'yolo11s.pt'

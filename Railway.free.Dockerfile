@@ -5,6 +5,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /opt/bpna
 
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libgl1 libglib2.0-0 libxcb1 \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY services/api_gateway/requirements.txt /tmp/api_gateway.txt
 COPY services/auth_service/requirements.txt /tmp/auth_service.txt
 COPY services/control_service/requirements.txt /tmp/control_service.txt
