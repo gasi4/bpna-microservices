@@ -2,38 +2,41 @@ import json
 
 from fastapi import WebSocket
 
-from app.services.state import wifi_viewers
+from app.services.state import get_device_state
 
 
-async def broadcast_measurement(payload: dict) -> None:
+async def broadcast_measurement(device_id: str, payload: dict) -> None:
     dead = set()
     message = json.dumps(payload)
-    for client in set(wifi_viewers):
+    state = get_device_state(device_id)
+    for client in set(state.wifi_viewers):
         try:
             await client.send_text(message)
         except Exception:
             dead.add(client)
-    wifi_viewers.difference_update(dead)
+    state.wifi_viewers.difference_update(dead)
 
 
-async def broadcast_event(payload: dict) -> None:
+async def broadcast_event(device_id: str, payload: dict) -> None:
     dead = set()
     message = json.dumps(payload)
-    for client in set(wifi_viewers):
+    state = get_device_state(device_id)
+    for client in set(state.wifi_viewers):
         try:
             await client.send_text(message)
         except Exception:
             dead.add(client)
-    wifi_viewers.difference_update(dead)
+    state.wifi_viewers.difference_update(dead)
 
 
-async def register_wifi_viewer(websocket: WebSocket) -> None:
+async def register_wifi_viewer(websocket: WebSocket, device_id: str) -> None:
     await websocket.accept()
-    wifi_viewers.add(websocket)
+    state = get_device_state(device_id)
+    state.wifi_viewers.add(websocket)
     try:
         while True:
             await websocket.receive_text()
     except Exception:
         pass
     finally:
-        wifi_viewers.discard(websocket)
+        state.wifi_viewers.discard(websocket)

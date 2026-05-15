@@ -11,6 +11,7 @@ class WiFiMeasurement(Base):
     __tablename__ = "wifi_measurements"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    device_id: Mapped[str] = mapped_column(String(64), default="bpna-01", index=True)
     x: Mapped[int] = mapped_column(Integer, nullable=False)
     y: Mapped[int] = mapped_column(Integer, nullable=False)
     rssi: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -26,6 +27,7 @@ class SavedHeatmap(Base):
     __tablename__ = "saved_heatmaps"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    device_id: Mapped[str] = mapped_column(String(64), default="bpna-01", index=True)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     data: Mapped[dict | list] = mapped_column(JSON, nullable=False)
     created_at: Mapped[datetime] = mapped_column(

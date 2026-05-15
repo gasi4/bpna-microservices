@@ -26,10 +26,16 @@ const motorState = { left: "STOP", right: "STOP" };
 const pressedKeys = new Set();
 let commandLoop = null;
 const COMMAND_INTERVAL_MS = 150;
+const DEVICE_HEARTBEAT_INTERVAL_MS = 8000;
+const DEVICE_POLL_INTERVAL_MS = 10000;
 
-const AUTO_LOGIN = "operator";
-const AUTO_PASSWORD = "operator123";
-const DEVICE_ID = "bpna-01";
+let currentUser = null;
+let availableDevices = [];
+let devicePollTimer = null;
+let controlHeartbeatTimer = null;
+let videoStreamDeviceId = null;
+let telemetryStreamDeviceId = null;
+let wifiStreamDeviceId = null;
 
 let measurements = [];
 let currentHeatmap = null;
@@ -40,6 +46,7 @@ let activeScanMode = "manual";
 let flashLightEnabled = false;
 
 function getScanConfig() {
+
     const widthCm = Math.max(100, Number(document.getElementById("scan-width")?.value || 1000));
     const heightCm = Math.max(100, Number(document.getElementById("scan-height")?.value || 1000));
     const stepCm = Math.max(10, Number(document.getElementById("scan-step")?.value || 100));
@@ -62,71 +69,67 @@ function setAuthToken(token) {
     sessionStorage.setItem("access_token", token);
 }
 
-async function performAutoLogin() {
-    try {
-        const res = await fetch("/api/auth/login", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ username: AUTO_LOGIN, password: AUTO_PASSWORD }),
-        });
-
-        if (!res.ok) {
-            return false;
-        }
-
-        const data = await res.json();
-        if (data.access_token) {
-            setAuthToken(data.access_token);
-            console.log("[AUTH] Auto login success");
-            return true;
-        }
-    } catch (error) {
-        console.error("[AUTH] Login error:", error);
-    }
-
-    return false;
+function clearAuthToken() {
+    sessionStorage.removeItem("access_token");
 }
 
-async function ensureAuth() {
-    if (getAuthToken()) {
-        return true;
-    }
-
-    return performAutoLogin();
+function getActiveDeviceId() {
+    return sessionStorage.getItem("active_device_id");
 }
 
-async function apiFetch(url, options = {}, retryOn401 = true) {
-    await ensureAuth();
+function setActiveDeviceId(deviceId) {
+    if (deviceId) {
+        sessionStorage.setItem("active_device_id", deviceId);
+    } else {
+        sessionStorage.removeItem("active_device_id");
+    }
+}
 
+function getControlledDeviceId() {
+    return sessionStorage.getItem("controlled_device_id");
+}
+
+function setControlledDeviceId(deviceId) {
+    if (deviceId) {
+        sessionStorage.setItem("controlled_device_id", deviceId);
+    } else {
+        sessionStorage.removeItem("controlled_device_id");
+    }
+}
+
+function isActiveDeviceControlled() {
+    const activeDeviceId = getActiveDeviceId();
+    return Boolean(activeDeviceId) && getControlledDeviceId() === activeDeviceId;
+}
+
+function getActiveDeviceQuery() {
+    const deviceId = getActiveDeviceId();
+    return deviceId ? `device_id=${encodeURIComponent(deviceId)}` : "";
+}
+
+async function apiFetch(url, options = {}, allowUnauthorized = false) {
     const token = getAuthToken();
+    if (!token && !allowUnauthorized) {
+        throw new Error("Not authenticated");
+    }
+
     const headers = {
-        "Content-Type": "application/json",
+        ...(options.body ? { "Content-Type": "application/json" } : {}),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...(options.headers || {}),
     };
 
     const res = await fetch(url, { ...options, headers });
 
-    if (res.status === 401 && retryOn401) {
-        const ok = await performAutoLogin();
-        if (!ok) {
-            return res;
-        }
-
-        const refreshedToken = getAuthToken();
-        return fetch(url, {
-            ...options,
-            headers: {
-                ...headers,
-                Authorization: `Bearer ${refreshedToken}`,
-            },
-        });
+    if (res.status === 401 && !allowUnauthorized) {
+        performLocalLogout();
     }
 
     return res;
 }
 
 function setText(id, value) {
+
     const el = document.getElementById(id);
     if (el) {
         el.textContent = value;
@@ -139,7 +142,7 @@ function updateFlashlightUi() {
         return;
     }
 
-    button.textContent = `Фонарь: ${flashLightEnabled ? "ВКЛ" : "ВЫКЛ"}`;
+    button.textContent = `Р¤РѕРЅР°СЂСЊ: ${flashLightEnabled ? "Р’РљР›" : "Р’Р«РљР›"}`;
     button.classList.toggle("active", flashLightEnabled);
     button.classList.toggle("is-active", flashLightEnabled);
 }
@@ -261,14 +264,8 @@ window.addEventListener("DOMContentLoaded", async () => {
     ctx = canvas.getContext("2d");
     detectionCtx = detectionCanvas.getContext("2d");
 
-    await ensureAuth();
-
     resizeVideoCanvases();
     resizeHeatmapCanvases();
-
-    connectVideoStream();
-    connectTelemetryStream();
-    connectWiFiWebSocket();
 
     setupKeyboardControls();
     setupWifiControls();
@@ -276,9 +273,46 @@ window.addEventListener("DOMContentLoaded", async () => {
     updateFlashlightUi();
     updateVideoStatus();
 
-    await loadHeatmap();
-    await loadDroneTrack();
-    await loadScanStatus();
+    document.getElementById("login-form")?.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const username = document.getElementById("login-username")?.value?.trim() || "";
+        const password = document.getElementById("login-password")?.value || "";
+        if (!username || !password) {
+            showLoginError("Р’РІРµРґРёС‚Рµ Р»РѕРіРёРЅ Рё РїР°СЂРѕР»СЊ.");
+            return;
+        }
+
+        const ok = await login(username, password);
+        if (ok) {
+            document.getElementById("login-password").value = "";
+        }
+    });
+
+    document.getElementById("logout-btn")?.addEventListener("click", () => {
+        logout();
+    });
+
+    document.getElementById("open-device-list-btn")?.addEventListener("click", () => {
+        openDeviceList();
+    });
+
+    document.getElementById("close-device-list-btn")?.addEventListener("click", () => {
+        closeDeviceList();
+    });
+
+    document.getElementById("refresh-device-list-btn")?.addEventListener("click", async () => {
+        try {
+            await loadDevices({ preserveView: true });
+        } catch (error) {
+            console.error("Device list refresh error:", error);
+        }
+    });
+
+    document.getElementById("release-device-btn")?.addEventListener("click", async () => {
+        await releaseCurrentDevice();
+    });
+
+    await bootstrapApp();
 
     window.addEventListener("resize", () => {
         resizeVideoCanvases();
@@ -298,7 +332,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 
     setInterval(updateVideoStatus, 5000);
     setInterval(async () => {
-        if (showTrack && isScanning) {
+        if (showTrack && isScanning && getActiveDeviceId()) {
             await loadDroneTrack();
             if (currentHeatmap) {
                 drawHeatmap(currentHeatmap, "heatmap-canvas");
@@ -308,6 +342,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 });
 
 function toggleDetection() {
+
     detectionEnabled = !detectionEnabled;
 
     if (!detectionEnabled) {
@@ -325,7 +360,7 @@ function toggleDetection() {
 function updateDetectionUi() {
     const toggle = document.getElementById("detection-toggle");
     if (toggle) {
-        toggle.textContent = `Детекция: ${detectionEnabled ? "ВКЛ" : "ВЫКЛ"}`;
+        toggle.textContent = `Р”РµС‚РµРєС†РёСЏ: ${detectionEnabled ? "Р’РљР›" : "Р’Р«РљР›"}`;
         toggle.classList.toggle("active", detectionEnabled);
     }
 
@@ -334,17 +369,17 @@ function updateDetectionUi() {
 
     if (summary) {
         if (!detectionEnabled) {
-            summary.textContent = "Детекция выключена";
+            summary.textContent = "Р”РµС‚РµРєС†РёСЏ РІС‹РєР»СЋС‡РµРЅР°";
         } else if (!detectionBoxes.length) {
-            summary.textContent = "Детекция включена, ожидание объектов";
+            summary.textContent = "Р”РµС‚РµРєС†РёСЏ РІРєР»СЋС‡РµРЅР°, РѕР¶РёРґР°РЅРёРµ РѕР±СЉРµРєС‚РѕРІ";
         } else {
-            summary.textContent = `Найдено объектов: ${detectionBoxes.length}`;
+            summary.textContent = `РќР°Р№РґРµРЅРѕ РѕР±СЉРµРєС‚РѕРІ: ${detectionBoxes.length}`;
         }
     }
 
     const autopilotButton = document.getElementById("autopilot-toggle");
     if (autopilotButton) {
-        autopilotButton.textContent = `Автопилот: ${autopilotEnabled ? "ВКЛ" : "ВЫКЛ"}`;
+        autopilotButton.textContent = `РђРІС‚РѕРїРёР»РѕС‚: ${autopilotEnabled ? "Р’РљР›" : "Р’Р«РљР›"}`;
         autopilotButton.classList.toggle("active", autopilotEnabled);
         autopilotButton.disabled = !detectionEnabled || selectedAutopilotTargetId === null || !selectedAutopilotTargetLabel;
     }
@@ -384,7 +419,7 @@ function refreshAutopilotTargetOptions(boxes) {
     if (!tracked.length) {
         const option = document.createElement("option");
         option.value = "";
-        option.textContent = detectionEnabled ? "Трекинг недоступен" : "Детекция выключена";
+        option.textContent = detectionEnabled ? "РўСЂРµРєРёРЅРі РЅРµРґРѕСЃС‚СѓРїРµРЅ" : "Р”РµС‚РµРєС†РёСЏ РІС‹РєР»СЋС‡РµРЅР°";
         select.appendChild(option);
         select.disabled = true;
         selectedAutopilotTargetId = null;
@@ -426,6 +461,12 @@ function refreshAutopilotTargetOptions(boxes) {
 }
 
 async function toggleAutopilot() {
+    const deviceId = getActiveDeviceId();
+    if (!deviceId || !isActiveDeviceControlled()) {
+        window.alert("РЎРЅР°С‡Р°Р»Р° РІРѕР·СЊРјРёС‚Рµ РїР»Р°С‚С„РѕСЂРјСѓ РїРѕРґ СѓРїСЂР°РІР»РµРЅРёРµ.");
+        return;
+    }
+
     if (selectedAutopilotTargetId === null || !selectedAutopilotTargetLabel) {
         console.warn("[AUTOPILOT] No tracked target selected");
         return;
@@ -435,7 +476,7 @@ async function toggleAutopilot() {
 
     try {
         const res = await apiFetch(
-            `/api/device/autopilot?enabled=${nextState}&target_id=${selectedAutopilotTargetId}&target_label=${encodeURIComponent(selectedAutopilotTargetLabel)}`,
+            `/api/device/autopilot?enabled=${nextState}&device_id=${encodeURIComponent(deviceId)}&target_id=${selectedAutopilotTargetId}&target_label=${encodeURIComponent(selectedAutopilotTargetLabel)}`,
             { method: "POST" }
         );
 
@@ -452,6 +493,7 @@ async function toggleAutopilot() {
             document.querySelectorAll(".key-chip").forEach((chip) => chip.classList.remove("active"));
         }
 
+        updateControlAvailability();
         updateDetectionUi();
         updateTargetDistanceBadge();
     } catch (error) {
@@ -466,7 +508,7 @@ function updateTargetDistanceBadge() {
     }
 
     if (!selectedAutopilotTargetLabel || selectedAutopilotTargetId === null) {
-        badge.textContent = "Цель не выбрана";
+        badge.textContent = "Р¦РµР»СЊ РЅРµ РІС‹Р±СЂР°РЅР°";
         return;
     }
 
@@ -475,18 +517,597 @@ function updateTargetDistanceBadge() {
     );
 
     if (!target) {
-        badge.textContent = `Цель ${selectedAutopilotTargetLabel} #${selectedAutopilotTargetId} потеряна`;
+        badge.textContent = `Р¦РµР»СЊ ${selectedAutopilotTargetLabel} #${selectedAutopilotTargetId} РїРѕС‚РµСЂСЏРЅР°`;
         return;
     }
 
     const distanceText = target.distance_cm != null
-        ? `${(target.distance_cm / 100).toFixed(2)} м`
-        : "без оценки дистанции";
+        ? `${(target.distance_cm / 100).toFixed(2)} Рј`
+        : "Р±РµР· РѕС†РµРЅРєРё РґРёСЃС‚Р°РЅС†РёРё";
 
-    badge.textContent = `${target.label} #${target.track_id} | дистанция ${distanceText}${autopilotEnabled ? " | автопилот активен" : ""}`;
+    badge.textContent = `${target.label} #${target.track_id} | РґРёСЃС‚Р°РЅС†РёСЏ ${distanceText}${autopilotEnabled ? " | Р°РІС‚РѕРїРёР»РѕС‚ Р°РєС‚РёРІРµРЅ" : ""}`;
+}
+
+function getDeviceById(deviceId) {
+    return availableDevices.find((item) => item.device_id === deviceId) || null;
+}
+
+function formatRole(role) {
+    if (role === "admin") {
+        return "РђРґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂ";
+    }
+    return "РћРїРµСЂР°С‚РѕСЂ";
+}
+
+function formatStatus(status) {
+    if (status === "busy") {
+        return "busy";
+    }
+    if (status === "online") {
+        return "online";
+    }
+    return "offline";
+}
+
+function formatStatusLabel(status) {
+    if (status === "busy") {
+        return "Р—Р°РЅСЏС‚";
+    }
+    if (status === "online") {
+        return "РћРЅР»Р°Р№РЅ";
+    }
+    return "РћС„С„Р»Р°Р№РЅ";
+}
+
+function formatLastSeen(value) {
+    if (!value) {
+        return "-";
+    }
+
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+        return value;
+    }
+
+    return parsed.toLocaleString("ru-RU");
+}
+
+function showElement(id, visible) {
+    const el = document.getElementById(id);
+    if (el) {
+        el.classList.toggle("hidden", !visible);
+    }
+}
+
+function setDashboardVisible(visible) {
+    showElement("cockpit-dashboard", visible);
+}
+
+function openDeviceList() {
+    showElement("device-selection-screen", true);
+    setDashboardVisible(false);
+}
+
+function closeDeviceList() {
+    if (!getActiveDeviceId()) {
+        return;
+    }
+
+    showElement("device-selection-screen", false);
+    setDashboardVisible(true);
+}
+
+function renderCurrentUser() {
+    setText("current-user-name", currentUser?.username || "-");
+    setText("current-user-role", currentUser ? formatRole(currentUser.role) : "-");
+}
+
+function renderActiveDevice(device) {
+    const nameEl = document.getElementById("active-device-name");
+    const statusEl = document.getElementById("active-device-status");
+    if (!nameEl || !statusEl) {
+        return;
+    }
+
+    if (!device) {
+        nameEl.textContent = "РќРµ РІС‹Р±СЂР°РЅР°";
+        statusEl.textContent = "offline";
+        statusEl.className = "chip-status offline";
+        return;
+    }
+
+    nameEl.textContent = device.name || device.device_id;
+    statusEl.textContent = formatStatus(device.status);
+    statusEl.className = `chip-status ${formatStatus(device.status)}`;
+}
+
+function updateControlAvailability() {
+    const canControl = isActiveDeviceControlled();
+
+    document.querySelectorAll(".key-chip").forEach((chip) => {
+        chip.disabled = !canControl || autopilotEnabled;
+    });
+
+    const flashlightButton = document.getElementById("flashlight-toggle");
+    if (flashlightButton) {
+        flashlightButton.disabled = !canControl;
+    }
+
+    const startScanButton = document.getElementById("start-scan-btn");
+    if (startScanButton) {
+        startScanButton.disabled = !canControl;
+    }
+
+    const stopScanButton = document.getElementById("stop-scan-btn");
+    if (stopScanButton) {
+        stopScanButton.disabled = !canControl;
+    }
+
+    const clearTrackButton = document.getElementById("clear-track-btn");
+    if (clearTrackButton) {
+        clearTrackButton.disabled = !canControl;
+    }
+
+    const clearDataButton = document.getElementById("clear-data-btn");
+    if (clearDataButton) {
+        clearDataButton.disabled = !canControl;
+    }
+
+    const releaseButton = document.getElementById("release-device-btn");
+    if (releaseButton) {
+        releaseButton.disabled = !Boolean(getControlledDeviceId());
+    }
+
+    updateScanAutopilotButton();
+    updateFlashlightUi();
+}
+
+function stopDevicePolling() {
+    if (!devicePollTimer) {
+        return;
+    }
+
+    clearInterval(devicePollTimer);
+    devicePollTimer = null;
+}
+
+function startDevicePolling() {
+    stopDevicePolling();
+    devicePollTimer = setInterval(() => {
+        if (currentUser) {
+            loadDevices({ preserveView: true });
+        }
+    }, DEVICE_POLL_INTERVAL_MS);
+}
+
+function stopControlHeartbeat() {
+    if (!controlHeartbeatTimer) {
+        return;
+    }
+
+    clearInterval(controlHeartbeatTimer);
+    controlHeartbeatTimer = null;
+}
+
+function startControlHeartbeat() {
+    stopControlHeartbeat();
+    const deviceId = getControlledDeviceId();
+    if (!deviceId) {
+        return;
+    }
+
+    controlHeartbeatTimer = setInterval(async () => {
+        try {
+            const res = await apiFetch(`/api/device/devices/${encodeURIComponent(deviceId)}/heartbeat`, { method: "POST" });
+            if (!res.ok) {
+                setControlledDeviceId(null);
+                stopControlHeartbeat();
+                await loadDevices({ preserveView: true });
+                updateControlAvailability();
+            }
+        } catch (error) {
+            console.error("Heartbeat error:", error);
+        }
+    }, DEVICE_HEARTBEAT_INTERVAL_MS);
+}
+
+function closeRealtimeStreams() {
+    if (videoWs) {
+        const ws = videoWs;
+        videoWs = null;
+        ws.onclose = null;
+        ws.onerror = null;
+        ws.close();
+    }
+
+    if (telemetryWs) {
+        const ws = telemetryWs;
+        telemetryWs = null;
+        ws.onclose = null;
+        ws.onerror = null;
+        ws.close();
+    }
+
+    if (wifiWs) {
+        const ws = wifiWs;
+        wifiWs = null;
+        ws.onclose = null;
+        ws.onerror = null;
+        ws.close();
+    }
+}
+
+function resetRealtimeState() {
+    updateStatus(false);
+    setText("esp-status", "Offline");
+    hasVideoFrame = false;
+    sourceFrameWidth = 0;
+    sourceFrameHeight = 0;
+    videoRenderState = null;
+    detectionBoxes = [];
+    currentTargetBox = null;
+    clearDetectionCanvas();
+    refreshAutopilotTargetOptions([]);
+    updateDetectionUi();
+    updateTargetDistanceBadge();
+    const noSignal = document.getElementById("no-signal");
+    if (noSignal) {
+        noSignal.style.display = "flex";
+    }
+}
+
+function applyDeviceSnapshot(device) {
+    renderActiveDevice(device);
+
+    if (!device) {
+        renderTelemetry({});
+        resetRealtimeState();
+        return;
+    }
+
+    renderTelemetry({
+        connected: Boolean(device.connected),
+        last_seen: device.last_seen,
+        last_data: device.last_data
+            ? { ...device.last_data, device_id: device.last_data.device_id || device.device_id }
+            : { device_id: device.device_id },
+    });
+
+    updateStatus(Boolean(device.connected));
+    setText("esp-status", device.connected ? "Connected" : "Offline");
+}
+
+function showLoginError(message = "") {
+    const errorEl = document.getElementById("login-error");
+    if (!errorEl) {
+        return;
+    }
+
+    errorEl.textContent = message;
+    errorEl.classList.toggle("hidden", !message);
+}
+
+function renderAuthState() {
+    const authenticated = Boolean(currentUser && getAuthToken());
+    showElement("auth-screen", !authenticated);
+    showElement("app-shell", authenticated);
+
+    if (!authenticated) {
+        openDeviceList();
+        setDashboardVisible(false);
+    }
+}
+
+function performLocalLogout() {
+    clearAuthToken();
+    setActiveDeviceId(null);
+    setControlledDeviceId(null);
+    currentUser = null;
+    availableDevices = [];
+    stopDevicePolling();
+    stopControlHeartbeat();
+    closeRealtimeStreams();
+    resetRealtimeState();
+    renderCurrentUser();
+    renderActiveDevice(null);
+    renderDeviceList();
+    updateControlAvailability();
+    renderAuthState();
+}
+
+async function loadCurrentUser() {
+    const res = await apiFetch("/api/auth/me");
+    if (!res.ok) {
+        throw new Error(`Failed to load profile: ${res.status}`);
+    }
+
+    currentUser = await res.json();
+    renderCurrentUser();
+    renderAuthState();
+}
+
+function renderDeviceList() {
+    const root = document.getElementById("device-list");
+    if (!root) {
+        return;
+    }
+
+    if (!availableDevices.length) {
+        root.innerHTML = '<div class="empty-state">Р”РѕСЃС‚СѓРїРЅС‹С… РїР»Р°С‚С„РѕСЂРј РїРѕРєР° РЅРµС‚.</div>';
+        return;
+    }
+
+    const activeDeviceId = getActiveDeviceId();
+
+    root.innerHTML = availableDevices.map((device) => {
+        const isActive = activeDeviceId === device.device_id;
+        const youControl = Boolean(device.you_control);
+        const controllerText = device.controller_username ? device.controller_username : "-";
+
+        let primaryAction = "";
+        if (device.status === "offline") {
+            primaryAction = `<button class="control-btn control-btn-secondary" data-action="view" data-device-id="${device.device_id}">РћС‚РєСЂС‹С‚СЊ С‚РµР»РµРјРµС‚СЂРёСЋ</button>`;
+        } else if (youControl) {
+            primaryAction = `<button class="control-btn" data-action="resume" data-device-id="${device.device_id}">РџСЂРѕРґРѕР»Р¶РёС‚СЊ СѓРїСЂР°РІР»РµРЅРёРµ</button>`;
+        } else if (device.status === "online") {
+            primaryAction = `<button class="control-btn" data-action="claim" data-device-id="${device.device_id}">Р’Р·СЏС‚СЊ СѓРїСЂР°РІР»РµРЅРёРµ</button>`;
+        } else {
+            primaryAction = `<button class="control-btn control-btn-secondary" disabled>Р—Р°РЅСЏС‚</button>`;
+        }
+
+        const secondaryAction = youControl
+            ? `<button class="control-btn control-btn-secondary" data-action="release" data-device-id="${device.device_id}">РћСЃРІРѕР±РѕРґРёС‚СЊ</button>`
+            : "";
+
+        return `
+            <article class="device-card ${isActive ? "is-active" : ""}">
+                <div class="device-card-head">
+                    <div class="device-card-title">
+                        <strong>${device.name || device.device_id}</strong>
+                        <span class="device-code">${device.device_id}</span>
+                    </div>
+                    <span class="chip-status ${formatStatus(device.status)}">${formatStatusLabel(device.status)}</span>
+                </div>
+
+                <div class="device-meta">
+                    <div class="device-meta-row"><span>РџРѕРґРєР»СЋС‡РµРЅРёРµ</span><strong>${device.connected ? "Р•СЃС‚СЊ" : "РќРµС‚"}</strong></div>
+                    <div class="device-meta-row"><span>РџРѕСЃР»РµРґРЅРёР№ СЃРёРіРЅР°Р»</span><strong>${formatLastSeen(device.last_seen)}</strong></div>
+                    <div class="device-meta-row"><span>РћРїРµСЂР°С‚РѕСЂ</span><strong>${controllerText}</strong></div>
+                </div>
+
+                <div class="device-actions">
+                    ${primaryAction}
+                    ${secondaryAction}
+                </div>
+            </article>
+        `;
+    }).join("");
+
+    root.querySelectorAll("button[data-action]").forEach((button) => {
+        button.addEventListener("click", async () => {
+            const action = button.dataset.action;
+            const deviceId = button.dataset.deviceId;
+            if (!action || !deviceId) {
+                return;
+            }
+
+            if (action === "view") {
+                await selectDeviceForView(deviceId);
+                closeDeviceList();
+                return;
+            }
+
+            if (action === "claim") {
+                await claimDevice(deviceId);
+                return;
+            }
+
+            if (action === "resume") {
+                setControlledDeviceId(deviceId);
+                startControlHeartbeat();
+                await selectDeviceForView(deviceId);
+                closeDeviceList();
+                return;
+            }
+
+            if (action === "release") {
+                await releaseDevice(deviceId);
+            }
+        });
+    });
+}
+
+async function loadDevices({ preserveView = true } = {}) {
+    const res = await apiFetch("/api/device/devices");
+    if (!res.ok) {
+        throw new Error(`Failed to load devices: ${res.status}`);
+    }
+
+    availableDevices = await res.json();
+    renderDeviceList();
+
+    const controlledDeviceId = getControlledDeviceId();
+    if (controlledDeviceId) {
+        const controlled = getDeviceById(controlledDeviceId);
+        if (!controlled || !controlled.you_control) {
+            setControlledDeviceId(null);
+            stopControlHeartbeat();
+        } else {
+            startControlHeartbeat();
+        }
+    }
+
+    const activeDeviceId = getActiveDeviceId();
+    const activeDevice = activeDeviceId ? getDeviceById(activeDeviceId) : null;
+    if (activeDevice) {
+        renderActiveDevice(activeDevice);
+        applyDeviceSnapshot(activeDevice);
+        if (preserveView) {
+            updateControlAvailability();
+        }
+    } else if (activeDeviceId) {
+        setActiveDeviceId(null);
+        renderActiveDevice(null);
+        setDashboardVisible(false);
+        openDeviceList();
+    }
+
+    updateControlAvailability();
+}
+
+async function selectDeviceForView(deviceId) {
+    const device = getDeviceById(deviceId);
+    if (!device) {
+        return;
+    }
+
+    setActiveDeviceId(deviceId);
+    applyDeviceSnapshot(device);
+    renderDeviceList();
+    updateControlAvailability();
+    setDashboardVisible(true);
+
+    closeRealtimeStreams();
+    resetRealtimeState();
+    applyDeviceSnapshot(device);
+    connectVideoStream();
+    connectTelemetryStream();
+    connectWiFiWebSocket();
+    await loadHeatmap();
+    await loadDroneTrack();
+    await loadScanStatus();
+}
+
+async function claimDevice(deviceId) {
+    const currentControlled = getControlledDeviceId();
+    if (currentControlled && currentControlled != deviceId) {
+        await releaseCurrentDevice({ silent: true });
+    }
+
+    const res = await apiFetch(`/api/device/devices/${encodeURIComponent(deviceId)}/claim`, { method: "POST" });
+    if (!res.ok) {
+        const message = await res.text();
+        window.alert(message || "РќРµ СѓРґР°Р»РѕСЃСЊ РІР·СЏС‚СЊ СѓРїСЂР°РІР»РµРЅРёРµ");
+        await loadDevices({ preserveView: true });
+        return;
+    }
+
+    setControlledDeviceId(deviceId);
+    startControlHeartbeat();
+    await loadDevices({ preserveView: true });
+    await selectDeviceForView(deviceId);
+    closeDeviceList();
+}
+
+async function releaseDevice(deviceId) {
+    const res = await apiFetch(`/api/device/devices/${encodeURIComponent(deviceId)}/release`, { method: "POST" });
+    if (!res.ok) {
+        return;
+    }
+
+    if (getControlledDeviceId() === deviceId) {
+        setControlledDeviceId(null);
+        stopControlHeartbeat();
+    }
+
+    await loadDevices({ preserveView: true });
+    updateControlAvailability();
+}
+
+async function releaseCurrentDevice({ silent = false } = {}) {
+    const deviceId = getControlledDeviceId();
+    if (!deviceId) {
+        return;
+    }
+
+    try {
+        const res = await apiFetch(`/api/device/devices/${encodeURIComponent(deviceId)}/release`, { method: "POST" });
+        if (!res.ok && !silent) {
+            const message = await res.text();
+            window.alert(message || "РќРµ СѓРґР°Р»РѕСЃСЊ РѕСЃРІРѕР±РѕРґРёС‚СЊ РїР»Р°С‚С„РѕСЂРјСѓ");
+        }
+    } catch (error) {
+        if (!silent) {
+            console.error("Release device error:", error);
+        }
+    }
+
+    setControlledDeviceId(null);
+    stopControlHeartbeat();
+    await loadDevices({ preserveView: true });
+}
+
+async function login(username, password) {
+    const submitButton = document.getElementById("login-submit");
+    if (submitButton) {
+        submitButton.disabled = true;
+    }
+
+    showLoginError("");
+
+    try {
+        const res = await apiFetch("/api/auth/login", {
+            method: "POST",
+            body: JSON.stringify({ username, password }),
+        }, true);
+
+        if (!res.ok) {
+            showLoginError("РќРµРІРµСЂРЅС‹Р№ Р»РѕРіРёРЅ РёР»Рё РїР°СЂРѕР»СЊ.");
+            return false;
+        }
+
+        const data = await res.json();
+        setAuthToken(data.access_token);
+        await loadCurrentUser();
+        await loadDevices({ preserveView: true });
+        startDevicePolling();
+        openDeviceList();
+        return true;
+    } catch (error) {
+        console.error("Login error:", error);
+        showLoginError("РќРµ СѓРґР°Р»РѕСЃСЊ РІРѕР№С‚Рё. РџСЂРѕРІРµСЂСЊС‚Рµ СЃРѕРµРґРёРЅРµРЅРёРµ СЃ СЃРµСЂРІРµСЂРѕРј.");
+        return false;
+    } finally {
+        if (submitButton) {
+            submitButton.disabled = false;
+        }
+    }
+}
+
+async function logout() {
+    await releaseCurrentDevice({ silent: true });
+    performLocalLogout();
+}
+
+async function bootstrapApp() {
+    renderAuthState();
+    updateControlAvailability();
+
+    const token = getAuthToken();
+    if (!token) {
+        return;
+    }
+
+    try {
+        await loadCurrentUser();
+        await loadDevices({ preserveView: true });
+        startDevicePolling();
+
+        const activeDeviceId = getActiveDeviceId();
+        if (activeDeviceId && getDeviceById(activeDeviceId)) {
+            await selectDeviceForView(activeDeviceId);
+            closeDeviceList();
+        } else {
+            openDeviceList();
+        }
+    } catch (error) {
+        console.error("Bootstrap error:", error);
+        performLocalLogout();
+    }
 }
 
 function renderVideoFrame(img) {
+
     const container = getVideoContainer();
     if (!container || !canvas || !ctx || !detectionCanvas || !detectionCtx) {
         return;
@@ -584,24 +1205,31 @@ function drawDetections() {
 
 function connectVideoStream() {
     const token = getAuthToken();
-    if (!token) {
-        setTimeout(connectVideoStream, 2000);
+    const deviceId = getActiveDeviceId();
+    if (!token || !deviceId) {
         return;
     }
 
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const host = window.location.host;
-    const wsUrl = `${protocol}//${host}/ws/view?token=${token}&device_id=${encodeURIComponent(DEVICE_ID)}`;
-
+    const wsUrl = `${protocol}//${host}/ws/view?token=${token}&device_id=${encodeURIComponent(deviceId)}`;
+    videoStreamDeviceId = deviceId;
     videoWs = new WebSocket(wsUrl);
     videoWs.binaryType = "arraybuffer";
 
     videoWs.onopen = () => {
+        if (getActiveDeviceId() !== deviceId) {
+            return;
+        }
         updateStatus(true);
         setText("esp-status", "Connected");
     };
 
     videoWs.onmessage = (event) => {
+        if (getActiveDeviceId() !== deviceId) {
+            return;
+        }
+
         if (event.data instanceof ArrayBuffer) {
             const blob = new Blob([event.data], { type: "image/jpeg" });
             const img = new Image();
@@ -647,6 +1275,10 @@ function connectVideoStream() {
     };
 
     videoWs.onclose = () => {
+        if (getActiveDeviceId() !== deviceId) {
+            return;
+        }
+
         updateStatus(false);
         setText("esp-status", "Offline");
         hasVideoFrame = false;
@@ -665,28 +1297,36 @@ function connectVideoStream() {
             noSignal.style.display = "flex";
         }
 
-        setTimeout(connectVideoStream, 3000);
+        if (currentUser && getActiveDeviceId() === deviceId) {
+            setTimeout(connectVideoStream, 3000);
+        }
     };
 
     videoWs.onerror = () => {
-        setText("esp-status", "Error");
+        if (getActiveDeviceId() === deviceId) {
+            setText("esp-status", "Error");
+        }
     };
 }
 
 function connectTelemetryStream() {
     const token = getAuthToken();
-    if (!token) {
-        setTimeout(connectTelemetryStream, 2000);
+    const deviceId = getActiveDeviceId();
+    if (!token || !deviceId) {
         return;
     }
 
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const host = window.location.host;
-    const wsUrl = `${protocol}//${host}/ws/telemetry?token=${token}&device_id=${encodeURIComponent(DEVICE_ID)}`;
-
+    const wsUrl = `${protocol}//${host}/ws/telemetry?token=${token}&device_id=${encodeURIComponent(deviceId)}`;
+    telemetryStreamDeviceId = deviceId;
     telemetryWs = new WebSocket(wsUrl);
 
     telemetryWs.onmessage = (event) => {
+        if (getActiveDeviceId() !== deviceId) {
+            return;
+        }
+
         try {
             const data = JSON.parse(event.data);
             renderTelemetry(data);
@@ -696,13 +1336,18 @@ function connectTelemetryStream() {
     };
 
     telemetryWs.onclose = () => {
-        setTimeout(connectTelemetryStream, 3000);
+        if (currentUser && getActiveDeviceId() === deviceId) {
+            setTimeout(connectTelemetryStream, 3000);
+        }
     };
 }
 
 function renderTelemetry(state) {
-    if (!state.connected) {
-        setText("device-id", "-");
+    const snapshot = state?.last_data || state || {};
+    const hasSnapshot = Boolean(snapshot && Object.keys(snapshot).length);
+
+    if (!state?.connected && !hasSnapshot) {
+        setText("device-id", getActiveDeviceId() || "-");
         setText("temperature", "-");
         setText("free-heap", "-");
         setText("uptime", "-");
@@ -724,19 +1369,19 @@ function renderTelemetry(state) {
         return;
     }
 
-    const data = state?.last_data || state || {};
+    const data = snapshot;
     const quality = getLinkQuality(data.wifi_rssi_dbm, data.ping_ms);
 
-    setText("device-id", data.device_id ?? "-");
-    setText("temperature", data.temperature != null ? `${Number(data.temperature).toFixed(1)} °C` : "-");
+    setText("device-id", data.device_id ?? getActiveDeviceId() ?? "-");
+    setText("temperature", data.temperature != null ? `${Number(data.temperature).toFixed(1)} В°C` : "-");
     setText("free-heap", data.free_heap != null ? `${Math.round(data.free_heap / 1024)} KB` : "-");
-    setText("uptime", formatUptime(data.uptime ?? 0));
+    setText("uptime", data.uptime != null ? formatUptime(data.uptime ?? 0) : "-");
     setText("cpu-load", data.cpu_load != null ? `${data.cpu_load}%` : "-");
     setText("wifi-rssi", data.wifi_rssi_dbm != null ? `${data.wifi_rssi_dbm} dBm` : "-");
     setText("wifi-ping", data.ping_ms != null && data.ping_ms >= 0 ? `${data.ping_ms} ms` : "-");
-    setText("created-at", state.last_seen || data.created_at || "-");
+    setText("created-at", state?.last_seen || data.created_at || "-");
     setText("battery-level", data.battery != null ? `${Number(data.battery).toFixed(0)}%` : "-");
-    setText("link-quality-copy", quality);
+    setText("link-quality-copy", quality === "Online" && !state?.connected ? "РџРѕСЃР»РµРґРЅРёРµ РґР°РЅРЅС‹Рµ" : quality);
     flashLightEnabled = Boolean(data.flash_led);
     updateFlashlightUi();
 
@@ -747,7 +1392,7 @@ function renderTelemetry(state) {
         linkBadge.classList.toggle("offline", !online);
 
         if (!online) {
-            linkBadge.textContent = "Offline";
+            linkBadge.textContent = state?.connected ? "Offline" : "РџРѕСЃР»РµРґРЅРёРµ РґР°РЅРЅС‹Рµ";
         } else if (data.ping_ok === false) {
             linkBadge.textContent = "Unstable";
         } else {
@@ -766,7 +1411,7 @@ function updateStatus(connected) {
 
     indicator.classList.toggle("offline", !connected);
     indicator.classList.toggle("online", connected);
-    text.textContent = connected ? "Подключено" : "Не подключено";
+    text.textContent = connected ? "РџРѕРґРєР»СЋС‡РµРЅРѕ" : "РќРµ РїРѕРґРєР»СЋС‡РµРЅРѕ";
 }
 
 function updateFps() {
@@ -810,9 +1455,14 @@ function commandByKey(key) {
 }
 
 async function sendDeviceCommand(command) {
+    const deviceId = getActiveDeviceId();
+    if (!deviceId) {
+        return false;
+    }
+
     const res = await apiFetch("/api/device/command", {
         method: "POST",
-        body: JSON.stringify({ command }),
+        body: JSON.stringify({ device_id: deviceId, command }),
     });
 
     if (!res.ok) {
@@ -824,7 +1474,7 @@ async function sendDeviceCommand(command) {
 }
 
 async function sendMotorCommand(command) {
-    if (autopilotEnabled) {
+    if (autopilotEnabled || !isActiveDeviceControlled()) {
         return;
     }
 
@@ -841,6 +1491,11 @@ async function sendMotorCommand(command) {
 }
 
 async function toggleFlashlight() {
+    if (!isActiveDeviceControlled()) {
+        window.alert("РЎРЅР°С‡Р°Р»Р° РІРѕР·СЊРјРёС‚Рµ РїР»Р°С‚С„РѕСЂРјСѓ РїРѕРґ СѓРїСЂР°РІР»РµРЅРёРµ.");
+        return;
+    }
+
     try {
         const ok = await sendDeviceCommand("flashlight-toggle");
         if (!ok) {
@@ -1031,42 +1686,47 @@ function setupKeyboardControls() {
 
 function connectWiFiWebSocket() {
     const token = getAuthToken();
-    if (!token) {
-        setTimeout(connectWiFiWebSocket, 2000);
+    const deviceId = getActiveDeviceId();
+    if (!token || !deviceId) {
         return;
     }
 
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const wsUrl = `${protocol}//${window.location.host}/ws/wifi-measurements?token=${token}`;
+    const wsUrl = `${protocol}//${window.location.host}/ws/wifi-measurements?token=${token}&device_id=${encodeURIComponent(deviceId)}`;
+    wifiStreamDeviceId = deviceId;
     wifiWs = new WebSocket(wsUrl);
 
     wifiWs.onopen = () => {
-        console.log("[WS] Connected to Wi-Fi measurements");
+        console.log("[WS] Connected to Wi-Fi measurements", deviceId);
     };
 
     wifiWs.onmessage = async (event) => {
+        if (getActiveDeviceId() !== deviceId) {
+            return;
+        }
+
         try {
             const data = JSON.parse(event.data);
 
             if (data.type === "wifi_measurement") {
                 measurements.push(data);
                 updateMeasurementCount();
-                setText("last-measurement", `????????? RSSI: ${data.rssi} dBm`);
+                setText("last-measurement", `РџРѕСЃР»РµРґРЅРёР№ RSSI: ${data.rssi} dBm`);
                 await loadHeatmap();
                 await loadDroneTrack();
             } else if (data.type === "scan_status") {
                 applyScanStatus(data);
                 await loadDroneTrack();
             } else if (data.type === "scan_notice") {
-                setText("scan-status-text", data.message || "???????????? ?????????");
+                setText("scan-status-text", data.message || "РЎРєР°РЅРёСЂРѕРІР°РЅРёРµ РІС‹РїРѕР»РЅСЏРµС‚СЃСЏ");
                 await loadDroneTrack();
             } else if (data.type === "scan_complete") {
                 isScanning = false;
                 activeScanMode = "manual";
                 autopilotEnabled = false;
                 updateScanAutopilotButton();
-                setText("scan-mode-text", "?????: ??????");
-                setText("scan-status-text", data.completed ? "???????????? ?????????" : "???????????? ???????????");
+                setText("scan-mode-text", "Р РµР¶РёРј: СЂСѓС‡РЅРѕР№");
+                setText("scan-status-text", data.completed ? "РЎРєР°РЅРёСЂРѕРІР°РЅРёРµ Р·Р°РІРµСЂС€РµРЅРѕ" : "РЎРєР°РЅРёСЂРѕРІР°РЅРёРµ РѕСЃС‚Р°РЅРѕРІР»РµРЅРѕ");
                 await loadHeatmap();
                 await loadDroneTrack();
             }
@@ -1076,7 +1736,9 @@ function connectWiFiWebSocket() {
     };
 
     wifiWs.onclose = () => {
-        setTimeout(connectWiFiWebSocket, 3000);
+        if (currentUser && getActiveDeviceId() === deviceId) {
+            setTimeout(connectWiFiWebSocket, 3000);
+        }
     };
 }
 
@@ -1128,7 +1790,15 @@ async function loadHeatmap() {
     try {
         const { widthCells, heightCells, stepCm } = getScanConfig();
 
-        const res = await apiFetch(`/api/wifi/heatmap?width_cells=${widthCells}&height_cells=${heightCells}&step_cm=${stepCm}`);
+        const deviceQuery = getActiveDeviceQuery();
+        if (!deviceQuery) {
+            currentHeatmap = null;
+            drawGridOnly("heatmap-canvas");
+            updateMeasurementCount(0);
+            return;
+        }
+
+        const res = await apiFetch(`/api/wifi/heatmap?${deviceQuery}&width_cells=${widthCells}&height_cells=${heightCells}&step_cm=${stepCm}`);
         const data = await res.json();
 
         if (data.error) {
@@ -1256,7 +1926,7 @@ function getDisplayedMeasurementCount() {
 
 function updateMeasurementCount(exactValue = null) {
     const nextValue = typeof exactValue === "number" ? exactValue : getDisplayedMeasurementCount() + 1;
-    setText("measurement-count", `Точек: ${nextValue}`);
+    setText("measurement-count", `РўРѕС‡РµРє: ${nextValue}`);
 }
 
 function releaseManualControls() {
@@ -1272,9 +1942,9 @@ function updateScanAutopilotButton() {
         return;
     }
 
-    button.textContent = `Автопроход: ${autopilotEnabled ? "ВКЛ" : "ВЫКЛ"}`;
+    button.textContent = `РђРІС‚РѕРїСЂРѕС…РѕРґ: ${autopilotEnabled ? "Р’РљР›" : "Р’Р«РљР›"}`;
     button.classList.toggle("active", autopilotEnabled);
-    button.disabled = !isScanning;
+    button.disabled = !isScanning || !isActiveDeviceControlled();
 }
 
 async function startScan() {
@@ -1282,12 +1952,18 @@ async function startScan() {
         const { widthCells, heightCells, stepCm } = getScanConfig();
 
         releaseManualControls();
-        const res = await apiFetch(`/api/wifi/start?width=${widthCells}&height=${heightCells}&step_cm=${stepCm}&mode=manual`, { method: "POST" });
+        if (!isActiveDeviceControlled()) {
+            window.alert("РЎРЅР°С‡Р°Р»Р° РІРѕР·СЊРјРёС‚Рµ РїР»Р°С‚С„РѕСЂРјСѓ РїРѕРґ СѓРїСЂР°РІР»РµРЅРёРµ.");
+            return;
+        }
+
+        const deviceQuery = getActiveDeviceQuery();
+        const res = await apiFetch(`/api/wifi/start?${deviceQuery}&width=${widthCells}&height=${heightCells}&step_cm=${stepCm}&mode=manual`, { method: "POST" });
         if (!res.ok) {
             isScanning = false;
             autopilotEnabled = false;
             updateScanAutopilotButton();
-            setText("scan-status-text", "Ошибка запуска");
+            setText("scan-status-text", "РћС€РёР±РєР° Р·Р°РїСѓСЃРєР°");
             return;
         }
 
@@ -1296,8 +1972,8 @@ async function startScan() {
             isScanning = false;
             autopilotEnabled = false;
             updateScanAutopilotButton();
-            setText("scan-status-text", "Ошибка запуска");
-            window.alert(data.message || "Не удалось запустить сканирование");
+            setText("scan-status-text", "РћС€РёР±РєР° Р·Р°РїСѓСЃРєР°");
+            window.alert(data.message || "РќРµ СѓРґР°Р»РѕСЃСЊ Р·Р°РїСѓСЃС‚РёС‚СЊ СЃРєР°РЅРёСЂРѕРІР°РЅРёРµ");
             return;
         }
 
@@ -1308,14 +1984,14 @@ async function startScan() {
         isScanning = false;
         autopilotEnabled = false;
         updateScanAutopilotButton();
-        setText("scan-status-text", "Ошибка запуска");
+        setText("scan-status-text", "РћС€РёР±РєР° Р·Р°РїСѓСЃРєР°");
         console.error("Start scan error:", error);
     }
 }
 
 async function toggleScanAutopilot() {
     if (!isScanning) {
-        window.alert("Сначала запустите сканирование");
+        window.alert("РЎРЅР°С‡Р°Р»Р° Р·Р°РїСѓСЃС‚РёС‚Рµ СЃРєР°РЅРёСЂРѕРІР°РЅРёРµ");
         return;
     }
 
@@ -1323,32 +1999,44 @@ async function toggleScanAutopilot() {
 
     try {
         releaseManualControls();
-        const res = await apiFetch(`/api/wifi/mode?mode=${nextMode}`, { method: "POST" });
+        if (!isActiveDeviceControlled()) {
+            window.alert("РЎРЅР°С‡Р°Р»Р° РІРѕР·СЊРјРёС‚Рµ РїР»Р°С‚С„РѕСЂРјСѓ РїРѕРґ СѓРїСЂР°РІР»РµРЅРёРµ.");
+            return;
+        }
+
+        const deviceQuery = getActiveDeviceQuery();
+        const res = await apiFetch(`/api/wifi/mode?${deviceQuery}&mode=${nextMode}`, { method: "POST" });
         if (!res.ok) {
-            setText("scan-status-text", "Не удалось переключить режим");
+            setText("scan-status-text", "РќРµ СѓРґР°Р»РѕСЃСЊ РїРµСЂРµРєР»СЋС‡РёС‚СЊ СЂРµР¶РёРј");
             return;
         }
 
         const data = await res.json();
         if (data.status === "error") {
-            setText("scan-status-text", data.message || "Не удалось переключить режим");
+            setText("scan-status-text", data.message || "РќРµ СѓРґР°Р»РѕСЃСЊ РїРµСЂРµРєР»СЋС‡РёС‚СЊ СЂРµР¶РёРј");
             return;
         }
 
         applyScanStatus(data);
     } catch (error) {
         console.error("Toggle scan autopilot error:", error);
-        setText("scan-status-text", "Ошибка переключения режима");
+        setText("scan-status-text", "РћС€РёР±РєР° РїРµСЂРµРєР»СЋС‡РµРЅРёСЏ СЂРµР¶РёРјР°");
     }
 }
 
 async function stopScan() {
     try {
-        const res = await apiFetch("/api/wifi/stop", { method: "POST" });
+        if (!isActiveDeviceControlled()) {
+            window.alert("РЎРЅР°С‡Р°Р»Р° РІРѕР·СЊРјРёС‚Рµ РїР»Р°С‚С„РѕСЂРјСѓ РїРѕРґ СѓРїСЂР°РІР»РµРЅРёРµ.");
+            return;
+        }
+
+        const deviceQuery = getActiveDeviceQuery();
+        const res = await apiFetch(`/api/wifi/stop?${deviceQuery}`, { method: "POST" });
         if (res.ok) {
             const data = await res.json();
             applyScanStatus(data);
-            setText("scan-status-text", "Сканирование остановлено");
+            setText("scan-status-text", "РЎРєР°РЅРёСЂРѕРІР°РЅРёРµ РѕСЃС‚Р°РЅРѕРІР»РµРЅРѕ");
         }
     } catch (error) {
         console.error("Stop scan error:", error);
@@ -1360,31 +2048,37 @@ function applyScanStatus(data) {
     isScanning = Boolean(data.running);
     autopilotEnabled = isScanning && activeScanMode === "autopilot";
     updateScanAutopilotButton();
-    setText("scan-mode-text", activeScanMode === "autopilot" ? "Режим: автопроход" : "Режим: ручной");
+    setText("scan-mode-text", activeScanMode === "autopilot" ? "Р РµР¶РёРј: Р°РІС‚РѕРїСЂРѕС…РѕРґ" : "Р РµР¶РёРј: СЂСѓС‡РЅРѕР№");
 
     if (!isScanning) {
-        setText("scan-status-text", "Ожидание");
+        setText("scan-status-text", "РћР¶РёРґР°РЅРёРµ");
         return;
     }
 
     const coords = `(${data.x ?? 0}, ${data.y ?? 0})`;
     setText(
         "scan-status-text",
-        activeScanMode === "autopilot" ? `Автопроход: ${coords}` : `Ручной проход: ${coords}`
+        activeScanMode === "autopilot" ? `РђРІС‚РѕРїСЂРѕС…РѕРґ: ${coords}` : `Р СѓС‡РЅРѕР№ РїСЂРѕС…РѕРґ: ${coords}`
     );
 }
 
 async function clearData() {
-    if (!window.confirm("Очистить все Wi-Fi измерения?")) {
+    if (!window.confirm("РћС‡РёСЃС‚РёС‚СЊ РІСЃРµ Wi-Fi РёР·РјРµСЂРµРЅРёСЏ?")) {
         return;
     }
 
     try {
-        await apiFetch("/api/wifi/measurements", { method: "DELETE" });
+        if (!isActiveDeviceControlled()) {
+            window.alert("РЎРЅР°С‡Р°Р»Р° РІРѕР·СЊРјРёС‚Рµ РїР»Р°С‚С„РѕСЂРјСѓ РїРѕРґ СѓРїСЂР°РІР»РµРЅРёРµ.");
+            return;
+        }
+
+        const deviceQuery = getActiveDeviceQuery();
+        await apiFetch(`/api/wifi/measurements?${deviceQuery}`, { method: "DELETE" });
         measurements = [];
         currentHeatmap = null;
         updateMeasurementCount(0);
-        setText("last-measurement", "Последний RSSI: --");
+        setText("last-measurement", "РџРѕСЃР»РµРґРЅРёР№ RSSI: --");
         drawGridOnly("heatmap-canvas");
     } catch (error) {
         console.error("Clear data error:", error);
@@ -1406,18 +2100,19 @@ function downloadHeatmapImage() {
 async function saveHeatmap() {
     const name = document.getElementById("map-name")?.value?.trim();
     if (!name) {
-        window.alert("Введите название карты");
+        window.alert("Р’РІРµРґРёС‚Рµ РЅР°Р·РІР°РЅРёРµ РєР°СЂС‚С‹");
         return;
     }
 
     try {
-        const res = await apiFetch(`/api/wifi/save?name=${encodeURIComponent(name)}`, { method: "POST" });
+        const deviceQuery = getActiveDeviceQuery();
+        const res = await apiFetch(`/api/wifi/save?${deviceQuery}&name=${encodeURIComponent(name)}`, { method: "POST" });
         if (!res.ok) {
-            window.alert("Не удалось сохранить карту");
+            window.alert("РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕС…СЂР°РЅРёС‚СЊ РєР°СЂС‚Сѓ");
             return;
         }
 
-        window.alert("Карта сохранена");
+        window.alert("РљР°СЂС‚Р° СЃРѕС…СЂР°РЅРµРЅР°");
         document.getElementById("map-name").value = "";
     } catch (error) {
         console.error("Save heatmap error:", error);
@@ -1426,7 +2121,8 @@ async function saveHeatmap() {
 
 async function loadSavedMapsList() {
     try {
-        const res = await apiFetch("/api/wifi/saved");
+        const deviceQuery = getActiveDeviceQuery();
+        const res = await apiFetch(`/api/wifi/saved?${deviceQuery}`);
         if (!res.ok) {
             return;
         }
@@ -1437,7 +2133,7 @@ async function loadSavedMapsList() {
             return;
         }
 
-        select.innerHTML = '<option value="">-- Выберите карту --</option>';
+        select.innerHTML = '<option value="">-- Р’С‹Р±РµСЂРёС‚Рµ РєР°СЂС‚Сѓ --</option>';
         maps.forEach((map) => {
             const option = document.createElement("option");
             option.value = map.id;
@@ -1457,7 +2153,8 @@ async function loadSavedHeatmap() {
     }
 
     try {
-        const res = await apiFetch(`/api/wifi/saved/${id}`);
+        const deviceQuery = getActiveDeviceQuery();
+        const res = await apiFetch(`/api/wifi/saved/${id}?${deviceQuery}`);
         if (!res.ok) {
             return;
         }
@@ -1502,7 +2199,12 @@ async function loadSavedHeatmap() {
 
 async function loadDroneTrack() {
     try {
-        const res = await apiFetch("/api/wifi/track");
+        const deviceQuery = getActiveDeviceQuery();
+        if (!deviceQuery) {
+            droneTrack = [];
+            return;
+        }
+        const res = await apiFetch(`/api/wifi/track?${deviceQuery}`);
         if (!res.ok) {
             return;
         }
@@ -1523,7 +2225,12 @@ async function loadDroneTrack() {
 
 async function loadScanStatus() {
     try {
-        const res = await apiFetch("/api/wifi/status");
+        const deviceQuery = getActiveDeviceQuery();
+        if (!deviceQuery) {
+            applyScanStatus({ running: false, mode: "manual" });
+            return;
+        }
+        const res = await apiFetch(`/api/wifi/status?${deviceQuery}`);
         if (!res.ok) {
             return;
         }
@@ -1536,7 +2243,13 @@ async function loadScanStatus() {
 
 async function clearDroneTrack() {
     try {
-        await apiFetch("/api/wifi/track", { method: "DELETE" });
+        if (!isActiveDeviceControlled()) {
+            window.alert("РЎРЅР°С‡Р°Р»Р° РІРѕР·СЊРјРёС‚Рµ РїР»Р°С‚С„РѕСЂРјСѓ РїРѕРґ СѓРїСЂР°РІР»РµРЅРёРµ.");
+            return;
+        }
+
+        const deviceQuery = getActiveDeviceQuery();
+        await apiFetch(`/api/wifi/track?${deviceQuery}`, { method: "DELETE" });
         droneTrack = [];
         if (currentHeatmap) {
             drawHeatmap(currentHeatmap, "heatmap-canvas");
@@ -1597,6 +2310,7 @@ function drawDroneTrack() {
         context.fill();
     }
 }
+
 
 
 
