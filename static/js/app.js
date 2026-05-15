@@ -989,30 +989,31 @@ function connectWiFiWebSocket() {
         console.log("[WS] Connected to Wi-Fi measurements");
     };
 
-    wifiWs.onmessage = (event) => {
+    wifiWs.onmessage = async (event) => {
         try {
             const data = JSON.parse(event.data);
 
             if (data.type === "wifi_measurement") {
                 measurements.push(data);
                 updateMeasurementCount();
-                setText("last-measurement", `Последний RSSI: ${data.rssi} dBm`);
-                if (currentHeatmap) {
-                    drawHeatmap(currentHeatmap, "heatmap-canvas");
-                }
+                setText("last-measurement", `Last RSSI: ${data.rssi} dBm`);
+                await loadHeatmap();
+                await loadDroneTrack();
             } else if (data.type === "scan_status") {
                 applyScanStatus(data);
+                await loadDroneTrack();
             } else if (data.type === "scan_notice") {
-                setText("scan-status-text", data.message || "Сканирование обновлено");
+                setText("scan-status-text", data.message || "Scan updated");
+                await loadDroneTrack();
             } else if (data.type === "scan_complete") {
                 isScanning = false;
                 activeScanMode = "manual";
                 autopilotEnabled = false;
                 updateScanAutopilotButton();
-                setText("scan-mode-text", "Режим: ручной");
-                setText("scan-status-text", data.completed ? "Сканирование завершено" : "Сканирование остановлено");
-                loadHeatmap();
-                loadDroneTrack();
+                setText("scan-mode-text", "Mode: manual");
+                setText("scan-status-text", data.completed ? "Scan complete" : "Scan stopped");
+                await loadHeatmap();
+                await loadDroneTrack();
             }
         } catch (error) {
             console.error("Wi-Fi WS parse error:", error);
@@ -1164,24 +1165,31 @@ function drawGridOnly(canvasId) {
     const context = canvasEl.getContext("2d");
     const width = canvasEl.width / (window.devicePixelRatio || 1);
     const height = canvasEl.height / (window.devicePixelRatio || 1);
-    const cellSize = Math.max(24, Math.round(width / 10));
+    const gridCols = Number(document.getElementById("scan-width")?.value || 10);
+    const gridRows = Number(document.getElementById("scan-height")?.value || 10);
+    const cellW = width / Math.max(1, gridCols);
+    const cellH = height / Math.max(1, gridRows);
 
     context.fillStyle = "#09111f";
     context.fillRect(0, 0, width, height);
     context.beginPath();
     context.strokeStyle = "rgba(255, 255, 255, 0.08)";
 
-    for (let x = 0; x <= width; x += cellSize) {
-        context.moveTo(x, 0);
-        context.lineTo(x, height);
+    for (let x = 0; x <= gridCols; x += 1) {
+        context.moveTo(x * cellW, 0);
+        context.lineTo(x * cellW, height);
     }
 
-    for (let y = 0; y <= height; y += cellSize) {
-        context.moveTo(0, y);
-        context.lineTo(width, y);
+    for (let y = 0; y <= gridRows; y += 1) {
+        context.moveTo(0, y * cellH);
+        context.lineTo(width, y * cellH);
     }
 
     context.stroke();
+
+    if (showTrack && droneTrack.length > 0 && canvasId === "heatmap-canvas") {
+        drawDroneTrack();
+    }
 }
 
 function getDisplayedMeasurementCount() {
@@ -1451,8 +1459,12 @@ async function loadDroneTrack() {
 
         const data = await res.json();
         droneTrack = data.track || [];
-        if (showTrack && currentHeatmap) {
-            drawHeatmap(currentHeatmap, "heatmap-canvas");
+        if (showTrack) {
+            if (currentHeatmap) {
+                drawHeatmap(currentHeatmap, "heatmap-canvas");
+            } else {
+                drawGridOnly("heatmap-canvas");
+            }
         }
     } catch (error) {
         console.error("Drone track load error:", error);
@@ -1478,6 +1490,8 @@ async function clearDroneTrack() {
         droneTrack = [];
         if (currentHeatmap) {
             drawHeatmap(currentHeatmap, "heatmap-canvas");
+        } else {
+            drawGridOnly("heatmap-canvas");
         }
     } catch (error) {
         console.error("Clear track error:", error);
@@ -1486,23 +1500,23 @@ async function clearDroneTrack() {
 
 function drawDroneTrack() {
     const canvasEl = document.getElementById("heatmap-canvas");
-    if (!canvasEl || !currentHeatmap || !droneTrack.length) {
+    if (!canvasEl || !droneTrack.length) {
         return;
     }
 
     const context = canvasEl.getContext("2d");
     const width = canvasEl.width / (window.devicePixelRatio || 1);
     const height = canvasEl.height / (window.devicePixelRatio || 1);
-    const maxX = Math.max(1, currentHeatmap.width_cells || 1);
-    const maxY = Math.max(1, currentHeatmap.height_cells || 1);
+    const maxX = Math.max(1, Number(currentHeatmap?.width_cells || document.getElementById("scan-width")?.value || 10));
+    const maxY = Math.max(1, Number(currentHeatmap?.height_cells || document.getElementById("scan-height")?.value || 10));
 
     if (droneTrack.length > 1) {
         let lastX = null;
         let lastY = null;
 
         for (const point of droneTrack) {
-            const px = (point.x / maxX) * width;
-            const py = (point.y / maxY) * height;
+            const px = ((Number(point.x) + 0.5) / maxX) * width;
+            const py = ((Number(point.y) + 0.5) / maxY) * height;
 
             context.strokeStyle = point.avoiding ? "#ff8c42" : "#35d7a0";
             context.lineWidth = 2;
@@ -1524,8 +1538,8 @@ function drawDroneTrack() {
             continue;
         }
 
-        const px = (point.x / maxX) * width;
-        const py = (point.y / maxY) * height;
+        const px = ((Number(point.x) + 0.5) / maxX) * width;
+        const py = ((Number(point.y) + 0.5) / maxY) * height;
         context.beginPath();
         context.arc(px, py, 4, 0, Math.PI * 2);
         context.fillStyle = "#ffffff";
