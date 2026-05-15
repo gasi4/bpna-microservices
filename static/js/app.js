@@ -31,6 +31,8 @@ const DEVICE_POLL_INTERVAL_MS = 10000;
 
 let currentUser = null;
 let availableDevices = [];
+let adminUsers = [];
+let adminDevices = [];
 let devicePollTimer = null;
 let controlHeartbeatTimer = null;
 let videoStreamDeviceId = null;
@@ -44,6 +46,7 @@ let droneTrack = [];
 let showTrack = true;
 let activeScanMode = "manual";
 let flashLightEnabled = false;
+let activeAdminTab = "users";
 
 function getScanConfig() {
 
@@ -142,7 +145,7 @@ function updateFlashlightUi() {
         return;
     }
 
-    button.textContent = `Р¤РѕРЅР°СЂСЊ: ${flashLightEnabled ? "Р’РљР›" : "Р’Р«РљР›"}`;
+    button.textContent = `\u0424\u043e\u043d\u0430\u0440\u044c: ${flashLightEnabled ? "\u0412\u041a\u041b" : "\u0412\u042b\u041a\u041b"}`;
     button.classList.toggle("active", flashLightEnabled);
     button.classList.toggle("is-active", flashLightEnabled);
 }
@@ -278,7 +281,7 @@ window.addEventListener("DOMContentLoaded", async () => {
         const username = document.getElementById("login-username")?.value?.trim() || "";
         const password = document.getElementById("login-password")?.value || "";
         if (!username || !password) {
-            showLoginError("Р’РІРµРґРёС‚Рµ Р»РѕРіРёРЅ Рё РїР°СЂРѕР»СЊ.");
+            showLoginError("\u0412\u0432\u0435\u0434\u0438\u0442\u0435 \u043b\u043e\u0433\u0438\u043d \u0438 \u043f\u0430\u0440\u043e\u043b\u044c.");
             return;
         }
 
@@ -296,8 +299,16 @@ window.addEventListener("DOMContentLoaded", async () => {
         openDeviceList();
     });
 
+    document.getElementById("open-admin-panel-btn")?.addEventListener("click", async () => {
+        await openAdminPanel();
+    });
+
     document.getElementById("close-device-list-btn")?.addEventListener("click", () => {
         closeDeviceList();
+    });
+
+    document.getElementById("close-admin-panel-btn")?.addEventListener("click", () => {
+        closeAdminPanel();
     });
 
     document.getElementById("refresh-device-list-btn")?.addEventListener("click", async () => {
@@ -310,6 +321,32 @@ window.addEventListener("DOMContentLoaded", async () => {
 
     document.getElementById("release-device-btn")?.addEventListener("click", async () => {
         await releaseCurrentDevice();
+    });
+
+    document.getElementById("admin-users-tab")?.addEventListener("click", () => {
+        setAdminTab("users");
+    });
+
+    document.getElementById("admin-devices-tab")?.addEventListener("click", () => {
+        setAdminTab("devices");
+    });
+
+    document.getElementById("refresh-admin-users-btn")?.addEventListener("click", async () => {
+        await loadAdminUsers();
+    });
+
+    document.getElementById("refresh-admin-devices-btn")?.addEventListener("click", async () => {
+        await loadAdminDevices();
+    });
+
+    document.getElementById("admin-user-form")?.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        await createAdminUser();
+    });
+
+    document.getElementById("admin-device-form")?.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        await createAdminDevice();
     });
 
     await bootstrapApp();
@@ -360,7 +397,7 @@ function toggleDetection() {
 function updateDetectionUi() {
     const toggle = document.getElementById("detection-toggle");
     if (toggle) {
-        toggle.textContent = `Р”РµС‚РµРєС†РёСЏ: ${detectionEnabled ? "Р’РљР›" : "Р’Р«РљР›"}`;
+        toggle.textContent = `\u0414\u0435\u0442\u0435\u043a\u0446\u0438\u044f: ${detectionEnabled ? "\u0412\u041a\u041b" : "\u0412\u042b\u041a\u041b"}`;
         toggle.classList.toggle("active", detectionEnabled);
     }
 
@@ -369,17 +406,17 @@ function updateDetectionUi() {
 
     if (summary) {
         if (!detectionEnabled) {
-            summary.textContent = "Р”РµС‚РµРєС†РёСЏ РІС‹РєР»СЋС‡РµРЅР°";
+            summary.textContent = "\u0414\u0435\u0442\u0435\u043a\u0446\u0438\u044f \u0432\u044b\u043a\u043b\u044e\u0447\u0435\u043d\u0430";
         } else if (!detectionBoxes.length) {
-            summary.textContent = "Р”РµС‚РµРєС†РёСЏ РІРєР»СЋС‡РµРЅР°, РѕР¶РёРґР°РЅРёРµ РѕР±СЉРµРєС‚РѕРІ";
+            summary.textContent = "\u0414\u0435\u0442\u0435\u043a\u0446\u0438\u044f \u0432\u043a\u043b\u044e\u0447\u0435\u043d\u0430, \u043e\u0436\u0438\u0434\u0430\u043d\u0438\u0435 \u043e\u0431\u044a\u0435\u043a\u0442\u043e\u0432";
         } else {
-            summary.textContent = `РќР°Р№РґРµРЅРѕ РѕР±СЉРµРєС‚РѕРІ: ${detectionBoxes.length}`;
+            summary.textContent = `\u041d\u0430\u0439\u0434\u0435\u043d\u043e \u043e\u0431\u044a\u0435\u043a\u0442\u043e\u0432: ${detectionBoxes.length}`;
         }
     }
 
     const autopilotButton = document.getElementById("autopilot-toggle");
     if (autopilotButton) {
-        autopilotButton.textContent = `РђРІС‚РѕРїРёР»РѕС‚: ${autopilotEnabled ? "Р’РљР›" : "Р’Р«РљР›"}`;
+        autopilotButton.textContent = `\u0410\u0432\u0442\u043e\u043f\u0438\u043b\u043e\u0442: ${autopilotEnabled ? "\u0412\u041a\u041b" : "\u0412\u042b\u041a\u041b"}`;
         autopilotButton.classList.toggle("active", autopilotEnabled);
         autopilotButton.disabled = !detectionEnabled || selectedAutopilotTargetId === null || !selectedAutopilotTargetLabel;
     }
@@ -419,7 +456,7 @@ function refreshAutopilotTargetOptions(boxes) {
     if (!tracked.length) {
         const option = document.createElement("option");
         option.value = "";
-        option.textContent = detectionEnabled ? "РўСЂРµРєРёРЅРі РЅРµРґРѕСЃС‚СѓРїРµРЅ" : "Р”РµС‚РµРєС†РёСЏ РІС‹РєР»СЋС‡РµРЅР°";
+        option.textContent = detectionEnabled ? "\u0422\u0440\u0435\u043a\u0438\u043d\u0433 \u043d\u0435\u0434\u043e\u0441\u0442\u0443\u043f\u0435\u043d" : "\u0414\u0435\u0442\u0435\u043a\u0446\u0438\u044f \u0432\u044b\u043a\u043b\u044e\u0447\u0435\u043d\u0430";
         select.appendChild(option);
         select.disabled = true;
         selectedAutopilotTargetId = null;
@@ -463,7 +500,7 @@ function refreshAutopilotTargetOptions(boxes) {
 async function toggleAutopilot() {
     const deviceId = getActiveDeviceId();
     if (!deviceId || !isActiveDeviceControlled()) {
-        window.alert("РЎРЅР°С‡Р°Р»Р° РІРѕР·СЊРјРёС‚Рµ РїР»Р°С‚С„РѕСЂРјСѓ РїРѕРґ СѓРїСЂР°РІР»РµРЅРёРµ.");
+        window.alert("\u0421\u043d\u0430\u0447\u0430\u043b\u0430 \u0432\u043e\u0437\u044c\u043c\u0438\u0442\u0435 \u043f\u043b\u0430\u0442\u0444\u043e\u0440\u043c\u0443 \u043f\u043e\u0434 \u0443\u043f\u0440\u0430\u0432\u043b\u0435\u043d\u0438\u0435.");
         return;
     }
 
@@ -508,7 +545,7 @@ function updateTargetDistanceBadge() {
     }
 
     if (!selectedAutopilotTargetLabel || selectedAutopilotTargetId === null) {
-        badge.textContent = "Р¦РµР»СЊ РЅРµ РІС‹Р±СЂР°РЅР°";
+        badge.textContent = "\u0426\u0435\u043b\u044c \u043d\u0435 \u0432\u044b\u0431\u0440\u0430\u043d\u0430";
         return;
     }
 
@@ -517,15 +554,15 @@ function updateTargetDistanceBadge() {
     );
 
     if (!target) {
-        badge.textContent = `Р¦РµР»СЊ ${selectedAutopilotTargetLabel} #${selectedAutopilotTargetId} РїРѕС‚РµСЂСЏРЅР°`;
+        badge.textContent = `\u0426\u0435\u043b\u044c ${selectedAutopilotTargetLabel} #${selectedAutopilotTargetId} \u043f\u043e\u0442\u0435\u0440\u044f\u043d\u0430`;
         return;
     }
 
     const distanceText = target.distance_cm != null
-        ? `${(target.distance_cm / 100).toFixed(2)} Рј`
-        : "Р±РµР· РѕС†РµРЅРєРё РґРёСЃС‚Р°РЅС†РёРё";
+        ? `${(target.distance_cm / 100).toFixed(2)} \u043c`
+        : "\u0431\u0435\u0437 \u043e\u0446\u0435\u043d\u043a\u0438 \u0434\u0438\u0441\u0442\u0430\u043d\u0446\u0438\u0438";
 
-    badge.textContent = `${target.label} #${target.track_id} | РґРёСЃС‚Р°РЅС†РёСЏ ${distanceText}${autopilotEnabled ? " | Р°РІС‚РѕРїРёР»РѕС‚ Р°РєС‚РёРІРµРЅ" : ""}`;
+    badge.textContent = `${target.label} #${target.track_id} | \u0434\u0438\u0441\u0442\u0430\u043d\u0446\u0438\u044f ${distanceText}${autopilotEnabled ? " | \u0430\u0432\u0442\u043e\u043f\u0438\u043b\u043e\u0442 \u0430\u043a\u0442\u0438\u0432\u0435\u043d" : ""}`;
 }
 
 function getDeviceById(deviceId) {
@@ -534,9 +571,9 @@ function getDeviceById(deviceId) {
 
 function formatRole(role) {
     if (role === "admin") {
-        return "РђРґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂ";
+        return "\u0410\u0434\u043c\u0438\u043d\u0438\u0441\u0442\u0440\u0430\u0442\u043e\u0440";
     }
-    return "РћРїРµСЂР°С‚РѕСЂ";
+    return "\u041e\u043f\u0435\u0440\u0430\u0442\u043e\u0440";
 }
 
 function formatStatus(status) {
@@ -551,15 +588,28 @@ function formatStatus(status) {
 
 function formatStatusLabel(status) {
     if (status === "busy") {
-        return "Р—Р°РЅСЏС‚";
+        return "\u0417\u0430\u043d\u044f\u0442";
     }
     if (status === "online") {
-        return "РћРЅР»Р°Р№РЅ";
+        return "\u041e\u043d\u043b\u0430\u0439\u043d";
     }
-    return "РћС„С„Р»Р°Р№РЅ";
+    return "\u041e\u0444\u0444\u043b\u0430\u0439\u043d";
 }
 
 function formatLastSeen(value) {
+    if (!value) {
+        return "-";
+    }
+
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+        return value;
+    }
+
+    return parsed.toLocaleString("ru-RU");
+}
+
+function formatCreatedAt(value) {
     if (!value) {
         return "-";
     }
@@ -583,7 +633,12 @@ function setDashboardVisible(visible) {
     showElement("cockpit-dashboard", visible);
 }
 
+function isAdminUser() {
+    return currentUser?.role === "admin";
+}
+
 function openDeviceList() {
+    showElement("admin-screen", false);
     showElement("device-selection-screen", true);
     setDashboardVisible(false);
 }
@@ -597,9 +652,40 @@ function closeDeviceList() {
     setDashboardVisible(true);
 }
 
+function setAdminTab(tab) {
+    activeAdminTab = tab === "devices" ? "devices" : "users";
+    showElement("admin-users-panel", activeAdminTab === "users");
+    showElement("admin-devices-panel", activeAdminTab === "devices");
+    document.getElementById("admin-users-tab")?.classList.toggle("is-active", activeAdminTab === "users");
+    document.getElementById("admin-devices-tab")?.classList.toggle("is-active", activeAdminTab === "devices");
+}
+
+async function openAdminPanel() {
+    if (!isAdminUser()) {
+        return;
+    }
+
+    showElement("device-selection-screen", false);
+    setDashboardVisible(false);
+    showElement("admin-screen", true);
+    setAdminTab(activeAdminTab);
+    await Promise.all([loadAdminUsers(), loadAdminDevices()]);
+}
+
+function closeAdminPanel() {
+    showElement("admin-screen", false);
+
+    if (getActiveDeviceId()) {
+        setDashboardVisible(true);
+    } else {
+        openDeviceList();
+    }
+}
+
 function renderCurrentUser() {
     setText("current-user-name", currentUser?.username || "-");
     setText("current-user-role", currentUser ? formatRole(currentUser.role) : "-");
+    showElement("open-admin-panel-btn", isAdminUser());
 }
 
 function renderActiveDevice(device) {
@@ -610,14 +696,14 @@ function renderActiveDevice(device) {
     }
 
     if (!device) {
-        nameEl.textContent = "РќРµ РІС‹Р±СЂР°РЅР°";
-        statusEl.textContent = "offline";
+        nameEl.textContent = "\u041d\u0435 \u0432\u044b\u0431\u0440\u0430\u043d\u0430";
+        statusEl.textContent = "\u041d\u0435 \u0430\u043a\u0442\u0438\u0432\u043d\u0430";
         statusEl.className = "chip-status offline";
         return;
     }
 
     nameEl.textContent = device.name || device.device_id;
-    statusEl.textContent = formatStatus(device.status);
+    statusEl.textContent = formatStatusLabel(device.status);
     statusEl.className = `chip-status ${formatStatus(device.status)}`;
 }
 
@@ -793,6 +879,7 @@ function renderAuthState() {
     showElement("app-shell", authenticated);
 
     if (!authenticated) {
+        showElement("admin-screen", false);
         openDeviceList();
         setDashboardVisible(false);
     }
@@ -804,6 +891,8 @@ function performLocalLogout() {
     setControlledDeviceId(null);
     currentUser = null;
     availableDevices = [];
+    adminUsers = [];
+    adminDevices = [];
     stopDevicePolling();
     stopControlHeartbeat();
     closeRealtimeStreams();
@@ -826,6 +915,219 @@ async function loadCurrentUser() {
     renderAuthState();
 }
 
+function renderAdminOverview() {
+    setText("admin-users-count", String(adminUsers.filter((item) => item.is_active).length));
+    setText("admin-admins-count", String(adminUsers.filter((item) => item.is_active && item.role === "admin").length));
+    setText("admin-devices-count", String(adminDevices.filter((item) => item.is_active !== false).length));
+}
+
+function renderAdminUsers() {
+    const root = document.getElementById("admin-users-list");
+    if (!root) {
+        return;
+    }
+
+    if (!adminUsers.length) {
+        root.innerHTML = '<div class="empty-state">\u041f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u0435\u0439 \u043f\u043e\u043a\u0430 \u043d\u0435\u0442.</div>';
+        renderAdminOverview();
+        return;
+    }
+
+    root.innerHTML = adminUsers.map((user) => `
+        <article class="admin-list-item">
+            <div class="admin-list-row">
+                <div class="admin-list-title">
+                    <strong>${user.username}</strong>
+                    <span class="admin-list-subtitle">${formatRole(user.role)}</span>
+                </div>
+                <span class="chip-status admin-account-state ${user.is_active ? "online" : "offline"}">${user.is_active ? "\u0423\u0447\u0451\u0442\u043d\u0430\u044f \u0437\u0430\u043f\u0438\u0441\u044c \u0434\u0435\u0439\u0441\u0442\u0432\u0443\u0435\u0442" : "\u0423\u0447\u0451\u0442\u043d\u0430\u044f \u0437\u0430\u043f\u0438\u0441\u044c \u043e\u0442\u043a\u043b\u044e\u0447\u0435\u043d\u0430"}</span>
+            </div>
+            <div class="admin-list-meta">
+                <span>ID: ${user.id}</span>
+                <span>\u0421\u043e\u0437\u0434\u0430\u043d: ${formatCreatedAt(user.created_at)}</span>
+            </div>
+            <div class="admin-list-actions">
+                <button class="control-btn control-btn-danger" data-admin-user-delete="${user.id}" data-admin-user-purge="${user.is_active ? "false" : "true"}" ${user.username === currentUser?.username ? "disabled" : ""}>
+                    ${user.is_active ? "\u0414\u0435\u0430\u043a\u0442\u0438\u0432\u0438\u0440\u043e\u0432\u0430\u0442\u044c" : "\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u0438\u0437 \u0411\u0414"}
+                </button>
+            </div>
+        </article>
+    `).join("");
+
+    renderAdminOverview();
+
+    root.querySelectorAll("button[data-admin-user-delete]").forEach((button) => {
+        button.addEventListener("click", async () => {
+            const id = button.dataset.adminUserDelete;
+            if (!id) {
+                return;
+            }
+            const purge = button.dataset.adminUserPurge === "true";
+            const message = purge
+                ? "\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u044d\u0442\u0443 \u0443\u0447\u0451\u0442\u043d\u0443\u044e \u0437\u0430\u043f\u0438\u0441\u044c \u0438\u0437 \u0411\u0414?"
+                : "\u0414\u0435\u0430\u043a\u0442\u0438\u0432\u0438\u0440\u043e\u0432\u0430\u0442\u044c \u044d\u0442\u0443 \u0443\u0447\u0451\u0442\u043d\u0443\u044e \u0437\u0430\u043f\u0438\u0441\u044c?";
+            if (!window.confirm(message)) {
+                return;
+            }
+            await deleteAdminUser(id, purge);
+        });
+    });
+}
+
+function renderAdminDevices() {
+    const root = document.getElementById("admin-devices-list");
+    if (!root) {
+        return;
+    }
+
+    if (!adminDevices.length) {
+        root.innerHTML = '<div class="empty-state">\u041f\u043b\u0430\u0442\u0444\u043e\u0440\u043c \u043f\u043e\u043a\u0430 \u043d\u0435\u0442.</div>';
+        renderAdminOverview();
+        return;
+    }
+
+    root.innerHTML = adminDevices.map((device) => `
+        <article class="admin-list-item">
+            <div class="admin-list-row">
+                <div class="admin-list-title">
+                    <strong>${device.name || device.device_id}</strong>
+                </div>
+                <span class="chip-status admin-account-state ${device.is_active ? "online" : "offline"}">${device.is_active ? "\u041f\u043b\u0430\u0442\u0444\u043e\u0440\u043c\u0430 \u0430\u043a\u0442\u0438\u0432\u043d\u0430" : "\u041f\u043b\u0430\u0442\u0444\u043e\u0440\u043c\u0430 \u043e\u0442\u043a\u043b\u044e\u0447\u0435\u043d\u0430"}</span>
+            </div>
+            <div class="admin-list-meta">
+                <span>Device ID: ${device.device_id}</span>
+                <span>\u0421\u043e\u0437\u0434\u0430\u043d\u0430: ${formatCreatedAt(device.created_at)}</span>
+                <span>Secret: <code>${device.device_secret || "-"}</code></span>
+            </div>
+            <div class="admin-list-actions">
+                <button class="control-btn control-btn-danger" data-admin-device-delete="${device.device_id}" data-admin-device-purge="${device.is_active ? "false" : "true"}">
+                    ${device.is_active ? "\u0414\u0435\u0430\u043a\u0442\u0438\u0432\u0438\u0440\u043e\u0432\u0430\u0442\u044c" : "\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u0438\u0437 \u0411\u0414"}
+                </button>
+            </div>
+        </article>
+    `).join("");
+
+    renderAdminOverview();
+
+    root.querySelectorAll("button[data-admin-device-delete]").forEach((button) => {
+        button.addEventListener("click", async () => {
+            const deviceId = button.dataset.adminDeviceDelete;
+            if (!deviceId) {
+                return;
+            }
+            const purge = button.dataset.adminDevicePurge === "true";
+            const message = purge
+                ? "\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u044d\u0442\u0443 \u043f\u043b\u0430\u0442\u0444\u043e\u0440\u043c\u0443 \u0438\u0437 \u0411\u0414?"
+                : "\u0414\u0435\u0430\u043a\u0442\u0438\u0432\u0438\u0440\u043e\u0432\u0430\u0442\u044c \u044d\u0442\u0443 \u043f\u043b\u0430\u0442\u0444\u043e\u0440\u043c\u0443?";
+            if (!window.confirm(message)) {
+                return;
+            }
+            await deleteAdminDevice(deviceId, purge);
+        });
+    });
+}
+
+async function loadAdminUsers() {
+    if (!isAdminUser()) {
+        return;
+    }
+    const res = await apiFetch("/api/auth/users");
+    if (!res.ok) {
+        throw new Error(`Failed to load admin users: ${res.status}`);
+    }
+    adminUsers = await res.json();
+    renderAdminUsers();
+}
+
+async function loadAdminDevices() {
+    if (!isAdminUser()) {
+        return;
+    }
+    const res = await apiFetch("/api/auth/admin/devices");
+    if (!res.ok) {
+        throw new Error(`Failed to load admin devices: ${res.status}`);
+    }
+    adminDevices = await res.json();
+    renderAdminDevices();
+}
+
+async function createAdminUser() {
+    const username = document.getElementById("admin-user-username")?.value?.trim() || "";
+    const password = document.getElementById("admin-user-password")?.value || "";
+    const role = document.getElementById("admin-user-role")?.value || "operator";
+    if (!username || !password) {
+        window.alert("\u0417\u0430\u043f\u043e\u043b\u043d\u0438\u0442\u0435 \u043b\u043e\u0433\u0438\u043d \u0438 \u043f\u0430\u0440\u043e\u043b\u044c.");
+        return;
+    }
+
+    const res = await apiFetch("/api/auth/users", {
+        method: "POST",
+        body: JSON.stringify({ username, password, role }),
+    });
+    if (!res.ok) {
+        window.alert("\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u0441\u043e\u0437\u0434\u0430\u0442\u044c \u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u044f.");
+        return;
+    }
+
+    document.getElementById("admin-user-form")?.reset();
+    document.getElementById("admin-user-role").value = "operator";
+    await loadAdminUsers();
+}
+
+async function deleteAdminUser(userId, purge = false) {
+    const suffix = purge ? "/purge" : "";
+    const res = await apiFetch(`/api/auth/users/${encodeURIComponent(userId)}${suffix}`, { method: "DELETE" });
+    if (!res.ok) {
+        window.alert("\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u0443\u0434\u0430\u043b\u0438\u0442\u044c \u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u044f.");
+        return;
+    }
+    await loadAdminUsers();
+}
+
+async function createAdminDevice() {
+    const name = document.getElementById("admin-device-name")?.value?.trim() || "";
+    const deviceId = document.getElementById("admin-device-id")?.value?.trim() || "";
+    if (!name) {
+        window.alert("\u0412\u0432\u0435\u0434\u0438\u0442\u0435 \u043d\u0430\u0437\u0432\u0430\u043d\u0438\u0435 \u043f\u043b\u0430\u0442\u0444\u043e\u0440\u043c\u044b.");
+        return;
+    }
+
+    const res = await apiFetch("/api/auth/admin/devices", {
+        method: "POST",
+        body: JSON.stringify({ name, device_id: deviceId || null }),
+    });
+    if (!res.ok) {
+        window.alert("\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u0441\u043e\u0437\u0434\u0430\u0442\u044c \u043f\u043b\u0430\u0442\u0444\u043e\u0440\u043c\u0443.");
+        return;
+    }
+
+    const created = await res.json();
+    document.getElementById("admin-device-form")?.reset();
+    const secretBox = document.getElementById("admin-device-secret-box");
+    if (secretBox) {
+        secretBox.innerHTML = `
+            <strong>\u041d\u043e\u0432\u0430\u044f \u043f\u043b\u0430\u0442\u0444\u043e\u0440\u043c\u0430 \u0441\u043e\u0437\u0434\u0430\u043d\u0430</strong><br>
+            Device ID: <code>${created.device_id}</code><br>
+            Secret: <code>${created.device_secret}</code>
+        `;
+        secretBox.classList.remove("hidden");
+    }
+
+    await loadAdminDevices();
+    await loadDevices({ preserveView: true });
+}
+
+async function deleteAdminDevice(deviceId, purge = false) {
+    const suffix = purge ? "/purge" : "";
+    const res = await apiFetch(`/api/auth/admin/devices/${encodeURIComponent(deviceId)}${suffix}`, { method: "DELETE" });
+    if (!res.ok) {
+        window.alert("\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u0443\u0434\u0430\u043b\u0438\u0442\u044c \u043f\u043b\u0430\u0442\u0444\u043e\u0440\u043c\u0443.");
+        return;
+    }
+    await loadAdminDevices();
+    await loadDevices({ preserveView: true });
+}
+
 function renderDeviceList() {
     const root = document.getElementById("device-list");
     if (!root) {
@@ -833,7 +1135,7 @@ function renderDeviceList() {
     }
 
     if (!availableDevices.length) {
-        root.innerHTML = '<div class="empty-state">Р”РѕСЃС‚СѓРїРЅС‹С… РїР»Р°С‚С„РѕСЂРј РїРѕРєР° РЅРµС‚.</div>';
+        root.innerHTML = '<div class="empty-state">\u0414\u043e\u0441\u0442\u0443\u043f\u043d\u044b\u0445 \u043f\u043b\u0430\u0442\u0444\u043e\u0440\u043c \u043f\u043e\u043a\u0430 \u043d\u0435\u0442.</div>';
         return;
     }
 
@@ -846,17 +1148,17 @@ function renderDeviceList() {
 
         let primaryAction = "";
         if (device.status === "offline") {
-            primaryAction = `<button class="control-btn control-btn-secondary" data-action="view" data-device-id="${device.device_id}">РћС‚РєСЂС‹С‚СЊ С‚РµР»РµРјРµС‚СЂРёСЋ</button>`;
+            primaryAction = `<button class="control-btn control-btn-secondary" data-action="view" data-device-id="${device.device_id}">\u041e\u0442\u043a\u0440\u044b\u0442\u044c \u0442\u0435\u043b\u0435\u043c\u0435\u0442\u0440\u0438\u044e</button>`;
         } else if (youControl) {
-            primaryAction = `<button class="control-btn" data-action="resume" data-device-id="${device.device_id}">РџСЂРѕРґРѕР»Р¶РёС‚СЊ СѓРїСЂР°РІР»РµРЅРёРµ</button>`;
+            primaryAction = `<button class="control-btn" data-action="resume" data-device-id="${device.device_id}">\u041f\u0440\u043e\u0434\u043e\u043b\u0436\u0438\u0442\u044c \u0443\u043f\u0440\u0430\u0432\u043b\u0435\u043d\u0438\u0435</button>`;
         } else if (device.status === "online") {
-            primaryAction = `<button class="control-btn" data-action="claim" data-device-id="${device.device_id}">Р’Р·СЏС‚СЊ СѓРїСЂР°РІР»РµРЅРёРµ</button>`;
+            primaryAction = `<button class="control-btn" data-action="claim" data-device-id="${device.device_id}">\u0412\u0437\u044f\u0442\u044c \u0443\u043f\u0440\u0430\u0432\u043b\u0435\u043d\u0438\u0435</button>`;
         } else {
-            primaryAction = `<button class="control-btn control-btn-secondary" disabled>Р—Р°РЅСЏС‚</button>`;
+            primaryAction = `<button class="control-btn control-btn-secondary" disabled>\u0417\u0430\u043d\u044f\u0442</button>`;
         }
 
         const secondaryAction = youControl
-            ? `<button class="control-btn control-btn-secondary" data-action="release" data-device-id="${device.device_id}">РћСЃРІРѕР±РѕРґРёС‚СЊ</button>`
+            ? `<button class="control-btn control-btn-secondary" data-action="release" data-device-id="${device.device_id}">\u041e\u0441\u0432\u043e\u0431\u043e\u0434\u0438\u0442\u044c</button>`
             : "";
 
         return `
@@ -870,9 +1172,9 @@ function renderDeviceList() {
                 </div>
 
                 <div class="device-meta">
-                    <div class="device-meta-row"><span>РџРѕРґРєР»СЋС‡РµРЅРёРµ</span><strong>${device.connected ? "Р•СЃС‚СЊ" : "РќРµС‚"}</strong></div>
-                    <div class="device-meta-row"><span>РџРѕСЃР»РµРґРЅРёР№ СЃРёРіРЅР°Р»</span><strong>${formatLastSeen(device.last_seen)}</strong></div>
-                    <div class="device-meta-row"><span>РћРїРµСЂР°С‚РѕСЂ</span><strong>${controllerText}</strong></div>
+                    <div class="device-meta-row"><span>\u041f\u043e\u0434\u043a\u043b\u044e\u0447\u0435\u043d\u0438\u0435</span><strong>${device.connected ? "\u0415\u0441\u0442\u044c" : "\u041d\u0435\u0442"}</strong></div>
+                    <div class="device-meta-row"><span>\u041f\u043e\u0441\u043b\u0435\u0434\u043d\u0438\u0439 \u0441\u0438\u0433\u043d\u0430\u043b</span><strong>${formatLastSeen(device.last_seen)}</strong></div>
+                    <div class="device-meta-row"><span>\u041e\u043f\u0435\u0440\u0430\u0442\u043e\u0440</span><strong>${controllerText}</strong></div>
                 </div>
 
                 <div class="device-actions">
@@ -987,7 +1289,7 @@ async function claimDevice(deviceId) {
     const res = await apiFetch(`/api/device/devices/${encodeURIComponent(deviceId)}/claim`, { method: "POST" });
     if (!res.ok) {
         const message = await res.text();
-        window.alert(message || "РќРµ СѓРґР°Р»РѕСЃСЊ РІР·СЏС‚СЊ СѓРїСЂР°РІР»РµРЅРёРµ");
+        window.alert(message || "\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u0432\u0437\u044f\u0442\u044c \u0443\u043f\u0440\u0430\u0432\u043b\u0435\u043d\u0438\u0435");
         await loadDevices({ preserveView: true });
         return;
     }
@@ -1024,7 +1326,7 @@ async function releaseCurrentDevice({ silent = false } = {}) {
         const res = await apiFetch(`/api/device/devices/${encodeURIComponent(deviceId)}/release`, { method: "POST" });
         if (!res.ok && !silent) {
             const message = await res.text();
-            window.alert(message || "РќРµ СѓРґР°Р»РѕСЃСЊ РѕСЃРІРѕР±РѕРґРёС‚СЊ РїР»Р°С‚С„РѕСЂРјСѓ");
+            window.alert(message || "\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u043e\u0441\u0432\u043e\u0431\u043e\u0434\u0438\u0442\u044c \u043f\u043b\u0430\u0442\u0444\u043e\u0440\u043c\u0443");
         }
     } catch (error) {
         if (!silent) {
@@ -1052,7 +1354,7 @@ async function login(username, password) {
         }, true);
 
         if (!res.ok) {
-            showLoginError("РќРµРІРµСЂРЅС‹Р№ Р»РѕРіРёРЅ РёР»Рё РїР°СЂРѕР»СЊ.");
+            showLoginError("\u041d\u0435\u0432\u0435\u0440\u043d\u044b\u0439 \u043b\u043e\u0433\u0438\u043d \u0438\u043b\u0438 \u043f\u0430\u0440\u043e\u043b\u044c.");
             return false;
         }
 
@@ -1061,11 +1363,15 @@ async function login(username, password) {
         await loadCurrentUser();
         await loadDevices({ preserveView: true });
         startDevicePolling();
-        openDeviceList();
+        if (isAdminUser()) {
+            await openAdminPanel();
+        } else {
+            openDeviceList();
+        }
         return true;
     } catch (error) {
         console.error("Login error:", error);
-        showLoginError("РќРµ СѓРґР°Р»РѕСЃСЊ РІРѕР№С‚Рё. РџСЂРѕРІРµСЂСЊС‚Рµ СЃРѕРµРґРёРЅРµРЅРёРµ СЃ СЃРµСЂРІРµСЂРѕРј.");
+        showLoginError("\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u0432\u043e\u0439\u0442\u0438. \u041f\u0440\u043e\u0432\u0435\u0440\u044c\u0442\u0435 \u0441\u043e\u0435\u0434\u0438\u043d\u0435\u043d\u0438\u0435 \u0441 \u0441\u0435\u0440\u0432\u0435\u0440\u043e\u043c.");
         return false;
     } finally {
         if (submitButton) {
@@ -1093,12 +1399,16 @@ async function bootstrapApp() {
         await loadDevices({ preserveView: true });
         startDevicePolling();
 
-        const activeDeviceId = getActiveDeviceId();
-        if (activeDeviceId && getDeviceById(activeDeviceId)) {
-            await selectDeviceForView(activeDeviceId);
-            closeDeviceList();
+        if (isAdminUser()) {
+            await openAdminPanel();
         } else {
-            openDeviceList();
+            const activeDeviceId = getActiveDeviceId();
+            if (activeDeviceId && getDeviceById(activeDeviceId)) {
+                await selectDeviceForView(activeDeviceId);
+                closeDeviceList();
+            } else {
+                openDeviceList();
+            }
         }
     } catch (error) {
         console.error("Bootstrap error:", error);
@@ -1373,7 +1683,7 @@ function renderTelemetry(state) {
     const quality = getLinkQuality(data.wifi_rssi_dbm, data.ping_ms);
 
     setText("device-id", data.device_id ?? getActiveDeviceId() ?? "-");
-    setText("temperature", data.temperature != null ? `${Number(data.temperature).toFixed(1)} В°C` : "-");
+    setText("temperature", data.temperature != null ? `${Number(data.temperature).toFixed(1)} \u00b0C` : "-");
     setText("free-heap", data.free_heap != null ? `${Math.round(data.free_heap / 1024)} KB` : "-");
     setText("uptime", data.uptime != null ? formatUptime(data.uptime ?? 0) : "-");
     setText("cpu-load", data.cpu_load != null ? `${data.cpu_load}%` : "-");
@@ -1381,7 +1691,7 @@ function renderTelemetry(state) {
     setText("wifi-ping", data.ping_ms != null && data.ping_ms >= 0 ? `${data.ping_ms} ms` : "-");
     setText("created-at", state?.last_seen || data.created_at || "-");
     setText("battery-level", data.battery != null ? `${Number(data.battery).toFixed(0)}%` : "-");
-    setText("link-quality-copy", quality === "Online" && !state?.connected ? "РџРѕСЃР»РµРґРЅРёРµ РґР°РЅРЅС‹Рµ" : quality);
+    setText("link-quality-copy", quality === "Online" && !state?.connected ? "\u041f\u043e\u0441\u043b\u0435\u0434\u043d\u0438\u0435 \u0434\u0430\u043d\u043d\u044b\u0435" : quality);
     flashLightEnabled = Boolean(data.flash_led);
     updateFlashlightUi();
 
@@ -1392,7 +1702,7 @@ function renderTelemetry(state) {
         linkBadge.classList.toggle("offline", !online);
 
         if (!online) {
-            linkBadge.textContent = state?.connected ? "Offline" : "РџРѕСЃР»РµРґРЅРёРµ РґР°РЅРЅС‹Рµ";
+            linkBadge.textContent = state?.connected ? "Offline" : "\u041f\u043e\u0441\u043b\u0435\u0434\u043d\u0438\u0435 \u0434\u0430\u043d\u043d\u044b\u0435";
         } else if (data.ping_ok === false) {
             linkBadge.textContent = "Unstable";
         } else {
@@ -1411,7 +1721,7 @@ function updateStatus(connected) {
 
     indicator.classList.toggle("offline", !connected);
     indicator.classList.toggle("online", connected);
-    text.textContent = connected ? "РџРѕРґРєР»СЋС‡РµРЅРѕ" : "РќРµ РїРѕРґРєР»СЋС‡РµРЅРѕ";
+    text.textContent = connected ? "\u041f\u043e\u0434\u043a\u043b\u044e\u0447\u0435\u043d\u043e" : "\u041d\u0435 \u043f\u043e\u0434\u043a\u043b\u044e\u0447\u0435\u043d\u043e";
 }
 
 function updateFps() {
@@ -1433,7 +1743,7 @@ function updateVideoStatus() {
     }
 
     if (videoWs && videoWs.readyState === WebSocket.OPEN) {
-        espStatus.textContent = hasVideoFrame ? "Streaming" : "Connected";
+        espStatus.textContent = hasVideoFrame ? "\u0418\u0434\u0451\u0442 \u043f\u043e\u0442\u043e\u043a" : "\u041f\u043e\u0434\u043a\u043b\u044e\u0447\u0435\u043d\u043e";
     } else {
         espStatus.textContent = "Offline";
     }
@@ -1492,7 +1802,7 @@ async function sendMotorCommand(command) {
 
 async function toggleFlashlight() {
     if (!isActiveDeviceControlled()) {
-        window.alert("РЎРЅР°С‡Р°Р»Р° РІРѕР·СЊРјРёС‚Рµ РїР»Р°С‚С„РѕСЂРјСѓ РїРѕРґ СѓРїСЂР°РІР»РµРЅРёРµ.");
+        window.alert("\u0421\u043d\u0430\u0447\u0430\u043b\u0430 \u0432\u043e\u0437\u044c\u043c\u0438\u0442\u0435 \u043f\u043b\u0430\u0442\u0444\u043e\u0440\u043c\u0443 \u043f\u043e\u0434 \u0443\u043f\u0440\u0430\u0432\u043b\u0435\u043d\u0438\u0435.");
         return;
     }
 
@@ -1621,8 +1931,17 @@ function handleRelease(key) {
 }
 
 function setupKeyboardControls() {
+    const isTypingTarget = (target) => {
+        if (!(target instanceof HTMLElement)) {
+            return false;
+        }
+
+        const tag = target.tagName;
+        return target.isContentEditable || tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+    };
+
     document.addEventListener("keydown", (event) => {
-        if (autopilotEnabled) {
+        if (autopilotEnabled || isTypingTarget(event.target)) {
             return;
         }
 
@@ -1641,6 +1960,10 @@ function setupKeyboardControls() {
     });
 
     document.addEventListener("keyup", (event) => {
+        if (isTypingTarget(event.target)) {
+            return;
+        }
+
         const key = event.key.toLowerCase();
         if (!commandByKey(key)) {
             return;
@@ -1711,22 +2034,22 @@ function connectWiFiWebSocket() {
             if (data.type === "wifi_measurement") {
                 measurements.push(data);
                 updateMeasurementCount();
-                setText("last-measurement", `РџРѕСЃР»РµРґРЅРёР№ RSSI: ${data.rssi} dBm`);
+                setText("last-measurement", `\u041f\u043e\u0441\u043b\u0435\u0434\u043d\u0438\u0439 RSSI: ${data.rssi} dBm`);
                 await loadHeatmap();
                 await loadDroneTrack();
             } else if (data.type === "scan_status") {
                 applyScanStatus(data);
                 await loadDroneTrack();
             } else if (data.type === "scan_notice") {
-                setText("scan-status-text", data.message || "РЎРєР°РЅРёСЂРѕРІР°РЅРёРµ РІС‹РїРѕР»РЅСЏРµС‚СЃСЏ");
+                setText("scan-status-text", data.message || "\u0421\u043a\u0430\u043d\u0438\u0440\u043e\u0432\u0430\u043d\u0438\u0435 \u0432\u044b\u043f\u043e\u043b\u043d\u044f\u0435\u0442\u0441\u044f");
                 await loadDroneTrack();
             } else if (data.type === "scan_complete") {
                 isScanning = false;
                 activeScanMode = "manual";
                 autopilotEnabled = false;
                 updateScanAutopilotButton();
-                setText("scan-mode-text", "Р РµР¶РёРј: СЂСѓС‡РЅРѕР№");
-                setText("scan-status-text", data.completed ? "РЎРєР°РЅРёСЂРѕРІР°РЅРёРµ Р·Р°РІРµСЂС€РµРЅРѕ" : "РЎРєР°РЅРёСЂРѕРІР°РЅРёРµ РѕСЃС‚Р°РЅРѕРІР»РµРЅРѕ");
+                setText("scan-mode-text", "\u0420\u0435\u0436\u0438\u043c: \u0440\u0443\u0447\u043d\u043e\u0439");
+                setText("scan-status-text", data.completed ? "\u0421\u043a\u0430\u043d\u0438\u0440\u043e\u0432\u0430\u043d\u0438\u0435 \u0437\u0430\u0432\u0435\u0440\u0448\u0435\u043d\u043e" : "\u0421\u043a\u0430\u043d\u0438\u0440\u043e\u0432\u0430\u043d\u0438\u0435 \u043e\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u043e");
                 await loadHeatmap();
                 await loadDroneTrack();
             }
@@ -1926,7 +2249,7 @@ function getDisplayedMeasurementCount() {
 
 function updateMeasurementCount(exactValue = null) {
     const nextValue = typeof exactValue === "number" ? exactValue : getDisplayedMeasurementCount() + 1;
-    setText("measurement-count", `РўРѕС‡РµРє: ${nextValue}`);
+    setText("measurement-count", `\u0422\u043e\u0447\u0435\u043a: ${nextValue}`);
 }
 
 function releaseManualControls() {
@@ -1942,7 +2265,7 @@ function updateScanAutopilotButton() {
         return;
     }
 
-    button.textContent = `РђРІС‚РѕРїСЂРѕС…РѕРґ: ${autopilotEnabled ? "Р’РљР›" : "Р’Р«РљР›"}`;
+    button.textContent = `\u0410\u0432\u0442\u043e\u043f\u0440\u043e\u0445\u043e\u0434: ${autopilotEnabled ? "\u0412\u041a\u041b" : "\u0412\u042b\u041a\u041b"}`;
     button.classList.toggle("active", autopilotEnabled);
     button.disabled = !isScanning || !isActiveDeviceControlled();
 }
@@ -1953,7 +2276,7 @@ async function startScan() {
 
         releaseManualControls();
         if (!isActiveDeviceControlled()) {
-            window.alert("РЎРЅР°С‡Р°Р»Р° РІРѕР·СЊРјРёС‚Рµ РїР»Р°С‚С„РѕСЂРјСѓ РїРѕРґ СѓРїСЂР°РІР»РµРЅРёРµ.");
+            window.alert("\u0421\u043d\u0430\u0447\u0430\u043b\u0430 \u0432\u043e\u0437\u044c\u043c\u0438\u0442\u0435 \u043f\u043b\u0430\u0442\u0444\u043e\u0440\u043c\u0443 \u043f\u043e\u0434 \u0443\u043f\u0440\u0430\u0432\u043b\u0435\u043d\u0438\u0435.");
             return;
         }
 
@@ -1963,7 +2286,7 @@ async function startScan() {
             isScanning = false;
             autopilotEnabled = false;
             updateScanAutopilotButton();
-            setText("scan-status-text", "РћС€РёР±РєР° Р·Р°РїСѓСЃРєР°");
+            setText("scan-status-text", "\u041e\u0448\u0438\u0431\u043a\u0430 \u0437\u0430\u043f\u0443\u0441\u043a\u0430");
             return;
         }
 
@@ -1972,8 +2295,8 @@ async function startScan() {
             isScanning = false;
             autopilotEnabled = false;
             updateScanAutopilotButton();
-            setText("scan-status-text", "РћС€РёР±РєР° Р·Р°РїСѓСЃРєР°");
-            window.alert(data.message || "РќРµ СѓРґР°Р»РѕСЃСЊ Р·Р°РїСѓСЃС‚РёС‚СЊ СЃРєР°РЅРёСЂРѕРІР°РЅРёРµ");
+            setText("scan-status-text", "\u041e\u0448\u0438\u0431\u043a\u0430 \u0437\u0430\u043f\u0443\u0441\u043a\u0430");
+            window.alert(data.message || "\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u0437\u0430\u043f\u0443\u0441\u0442\u0438\u0442\u044c \u0441\u043a\u0430\u043d\u0438\u0440\u043e\u0432\u0430\u043d\u0438\u0435");
             return;
         }
 
@@ -1984,14 +2307,14 @@ async function startScan() {
         isScanning = false;
         autopilotEnabled = false;
         updateScanAutopilotButton();
-        setText("scan-status-text", "РћС€РёР±РєР° Р·Р°РїСѓСЃРєР°");
+        setText("scan-status-text", "\u041e\u0448\u0438\u0431\u043a\u0430 \u0437\u0430\u043f\u0443\u0441\u043a\u0430");
         console.error("Start scan error:", error);
     }
 }
 
 async function toggleScanAutopilot() {
     if (!isScanning) {
-        window.alert("РЎРЅР°С‡Р°Р»Р° Р·Р°РїСѓСЃС‚РёС‚Рµ СЃРєР°РЅРёСЂРѕРІР°РЅРёРµ");
+        window.alert("\u0421\u043d\u0430\u0447\u0430\u043b\u0430 \u0437\u0430\u043f\u0443\u0441\u0442\u0438\u0442\u0435 \u0441\u043a\u0430\u043d\u0438\u0440\u043e\u0432\u0430\u043d\u0438\u0435");
         return;
     }
 
@@ -2000,34 +2323,34 @@ async function toggleScanAutopilot() {
     try {
         releaseManualControls();
         if (!isActiveDeviceControlled()) {
-            window.alert("РЎРЅР°С‡Р°Р»Р° РІРѕР·СЊРјРёС‚Рµ РїР»Р°С‚С„РѕСЂРјСѓ РїРѕРґ СѓРїСЂР°РІР»РµРЅРёРµ.");
+            window.alert("\u0421\u043d\u0430\u0447\u0430\u043b\u0430 \u0432\u043e\u0437\u044c\u043c\u0438\u0442\u0435 \u043f\u043b\u0430\u0442\u0444\u043e\u0440\u043c\u0443 \u043f\u043e\u0434 \u0443\u043f\u0440\u0430\u0432\u043b\u0435\u043d\u0438\u0435.");
             return;
         }
 
         const deviceQuery = getActiveDeviceQuery();
         const res = await apiFetch(`/api/wifi/mode?${deviceQuery}&mode=${nextMode}`, { method: "POST" });
         if (!res.ok) {
-            setText("scan-status-text", "РќРµ СѓРґР°Р»РѕСЃСЊ РїРµСЂРµРєР»СЋС‡РёС‚СЊ СЂРµР¶РёРј");
+            setText("scan-status-text", "\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u043f\u0435\u0440\u0435\u043a\u043b\u044e\u0447\u0438\u0442\u044c \u0440\u0435\u0436\u0438\u043c");
             return;
         }
 
         const data = await res.json();
         if (data.status === "error") {
-            setText("scan-status-text", data.message || "РќРµ СѓРґР°Р»РѕСЃСЊ РїРµСЂРµРєР»СЋС‡РёС‚СЊ СЂРµР¶РёРј");
+            setText("scan-status-text", data.message || "\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u043f\u0435\u0440\u0435\u043a\u043b\u044e\u0447\u0438\u0442\u044c \u0440\u0435\u0436\u0438\u043c");
             return;
         }
 
         applyScanStatus(data);
     } catch (error) {
         console.error("Toggle scan autopilot error:", error);
-        setText("scan-status-text", "РћС€РёР±РєР° РїРµСЂРµРєР»СЋС‡РµРЅРёСЏ СЂРµР¶РёРјР°");
+        setText("scan-status-text", "\u041e\u0448\u0438\u0431\u043a\u0430 \u043f\u0435\u0440\u0435\u043a\u043b\u044e\u0447\u0435\u043d\u0438\u044f \u0440\u0435\u0436\u0438\u043c\u0430");
     }
 }
 
 async function stopScan() {
     try {
         if (!isActiveDeviceControlled()) {
-            window.alert("РЎРЅР°С‡Р°Р»Р° РІРѕР·СЊРјРёС‚Рµ РїР»Р°С‚С„РѕСЂРјСѓ РїРѕРґ СѓРїСЂР°РІР»РµРЅРёРµ.");
+            window.alert("\u0421\u043d\u0430\u0447\u0430\u043b\u0430 \u0432\u043e\u0437\u044c\u043c\u0438\u0442\u0435 \u043f\u043b\u0430\u0442\u0444\u043e\u0440\u043c\u0443 \u043f\u043e\u0434 \u0443\u043f\u0440\u0430\u0432\u043b\u0435\u043d\u0438\u0435.");
             return;
         }
 
@@ -2036,7 +2359,7 @@ async function stopScan() {
         if (res.ok) {
             const data = await res.json();
             applyScanStatus(data);
-            setText("scan-status-text", "РЎРєР°РЅРёСЂРѕРІР°РЅРёРµ РѕСЃС‚Р°РЅРѕРІР»РµРЅРѕ");
+            setText("scan-status-text", "\u0421\u043a\u0430\u043d\u0438\u0440\u043e\u0432\u0430\u043d\u0438\u0435 \u043e\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u043e");
         }
     } catch (error) {
         console.error("Stop scan error:", error);
@@ -2048,28 +2371,28 @@ function applyScanStatus(data) {
     isScanning = Boolean(data.running);
     autopilotEnabled = isScanning && activeScanMode === "autopilot";
     updateScanAutopilotButton();
-    setText("scan-mode-text", activeScanMode === "autopilot" ? "Р РµР¶РёРј: Р°РІС‚РѕРїСЂРѕС…РѕРґ" : "Р РµР¶РёРј: СЂСѓС‡РЅРѕР№");
+    setText("scan-mode-text", activeScanMode === "autopilot" ? "\u0420\u0435\u0436\u0438\u043c: \u0430\u0432\u0442\u043e\u043f\u0440\u043e\u0445\u043e\u0434" : "\u0420\u0435\u0436\u0438\u043c: \u0440\u0443\u0447\u043d\u043e\u0439");
 
     if (!isScanning) {
-        setText("scan-status-text", "РћР¶РёРґР°РЅРёРµ");
+        setText("scan-status-text", "\u041e\u0436\u0438\u0434\u0430\u043d\u0438\u0435");
         return;
     }
 
     const coords = `(${data.x ?? 0}, ${data.y ?? 0})`;
     setText(
         "scan-status-text",
-        activeScanMode === "autopilot" ? `РђРІС‚РѕРїСЂРѕС…РѕРґ: ${coords}` : `Р СѓС‡РЅРѕР№ РїСЂРѕС…РѕРґ: ${coords}`
+        activeScanMode === "autopilot" ? `\u0410\u0432\u0442\u043e\u043f\u0440\u043e\u0445\u043e\u0434: ${coords}` : `\u0420\u0443\u0447\u043d\u043e\u0439 \u043f\u0440\u043e\u0445\u043e\u0434: ${coords}`
     );
 }
 
 async function clearData() {
-    if (!window.confirm("Очистить все Wi-Fi измерения?")) {
+    if (!window.confirm("\u041e\u0447\u0438\u0441\u0442\u0438\u0442\u044c \u0432\u0441\u0435 Wi-Fi \u0438\u0437\u043c\u0435\u0440\u0435\u043d\u0438\u044f?")) {
         return;
     }
 
     try {
         if (!isActiveDeviceControlled()) {
-            window.alert("РЎРЅР°С‡Р°Р»Р° РІРѕР·СЊРјРёС‚Рµ РїР»Р°С‚С„РѕСЂРјСѓ РїРѕРґ СѓРїСЂР°РІР»РµРЅРёРµ.");
+            window.alert("\u0421\u043d\u0430\u0447\u0430\u043b\u0430 \u0432\u043e\u0437\u044c\u043c\u0438\u0442\u0435 \u043f\u043b\u0430\u0442\u0444\u043e\u0440\u043c\u0443 \u043f\u043e\u0434 \u0443\u043f\u0440\u0430\u0432\u043b\u0435\u043d\u0438\u0435.");
             return;
         }
 
@@ -2078,7 +2401,7 @@ async function clearData() {
         measurements = [];
         currentHeatmap = null;
         updateMeasurementCount(0);
-        setText("last-measurement", "РџРѕСЃР»РµРґРЅРёР№ RSSI: --");
+        setText("last-measurement", "\u041f\u043e\u0441\u043b\u0435\u0434\u043d\u0438\u0439 RSSI: --");
         drawGridOnly("heatmap-canvas");
     } catch (error) {
         console.error("Clear data error:", error);
@@ -2100,7 +2423,7 @@ function downloadHeatmapImage() {
 async function saveHeatmap() {
     const name = document.getElementById("map-name")?.value?.trim();
     if (!name) {
-        window.alert("Р’РІРµРґРёС‚Рµ РЅР°Р·РІР°РЅРёРµ РєР°СЂС‚С‹");
+        window.alert("\u0412\u0432\u0435\u0434\u0438\u0442\u0435 \u043d\u0430\u0437\u0432\u0430\u043d\u0438\u0435 \u043a\u0430\u0440\u0442\u044b");
         return;
     }
 
@@ -2108,11 +2431,11 @@ async function saveHeatmap() {
         const deviceQuery = getActiveDeviceQuery();
         const res = await apiFetch(`/api/wifi/save?${deviceQuery}&name=${encodeURIComponent(name)}`, { method: "POST" });
         if (!res.ok) {
-            window.alert("РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕС…СЂР°РЅРёС‚СЊ РєР°СЂС‚Сѓ");
+            window.alert("\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u0441\u043e\u0445\u0440\u0430\u043d\u0438\u0442\u044c \u043a\u0430\u0440\u0442\u0443");
             return;
         }
 
-        window.alert("РљР°СЂС‚Р° СЃРѕС…СЂР°РЅРµРЅР°");
+        window.alert("\u041a\u0430\u0440\u0442\u0430 \u0441\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u0430");
         document.getElementById("map-name").value = "";
     } catch (error) {
         console.error("Save heatmap error:", error);
@@ -2133,7 +2456,7 @@ async function loadSavedMapsList() {
             return;
         }
 
-        select.innerHTML = '<option value="">-- Р’С‹Р±РµСЂРёС‚Рµ РєР°СЂС‚Сѓ --</option>';
+        select.innerHTML = '<option value="">-- \u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u043a\u0430\u0440\u0442\u0443 --</option>';
         maps.forEach((map) => {
             const option = document.createElement("option");
             option.value = map.id;
@@ -2244,7 +2567,7 @@ async function loadScanStatus() {
 async function clearDroneTrack() {
     try {
         if (!isActiveDeviceControlled()) {
-            window.alert("РЎРЅР°С‡Р°Р»Р° РІРѕР·СЊРјРёС‚Рµ РїР»Р°С‚С„РѕСЂРјСѓ РїРѕРґ СѓРїСЂР°РІР»РµРЅРёРµ.");
+            window.alert("\u0421\u043d\u0430\u0447\u0430\u043b\u0430 \u0432\u043e\u0437\u044c\u043c\u0438\u0442\u0435 \u043f\u043b\u0430\u0442\u0444\u043e\u0440\u043c\u0443 \u043f\u043e\u0434 \u0443\u043f\u0440\u0430\u0432\u043b\u0435\u043d\u0438\u0435.");
             return;
         }
 

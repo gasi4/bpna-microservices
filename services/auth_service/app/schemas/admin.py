@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import BaseModel, Field
 
 
@@ -12,6 +14,7 @@ class UserOut(BaseModel):
     username: str
     role: str
     is_active: bool
+    created_at: datetime | None = None
 
 
 class DeviceCreate(BaseModel):
@@ -24,6 +27,11 @@ class DeviceOut(BaseModel):
     device_id: str
     name: str
     is_active: bool
+    created_at: datetime | None = None
+
+
+class DeviceAdminOut(DeviceOut):
+    device_secret: str
 
 
 class DeviceCreateResponse(DeviceOut):

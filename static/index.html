@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Управление платформой</title>
-    <link rel="stylesheet" href="/static/css/style.css?v=2026-05-15-2">
+    <link rel="stylesheet" href="/static/css/style.css?v=2026-05-16-5">
 </head>
 <body>
     <div id="auth-screen" class="auth-shell">
@@ -40,7 +40,7 @@
                     <div class="active-device-chip">
                         <span class="chip-label">Активная платформа</span>
                         <strong id="active-device-name">Не выбрана</strong>
-                        <span id="active-device-status" class="chip-status offline">offline</span>
+                        <span id="active-device-status" class="chip-status offline">Не активна</span>
                     </div>
 
                     <div class="user-chip">
@@ -48,7 +48,8 @@
                         <span id="current-user-role">-</span>
                     </div>
 
-                    <button id="open-device-list-btn" class="control-btn control-btn-secondary">Список дронов</button>
+                    <button id="open-device-list-btn" class="control-btn control-btn-secondary">Список платформ</button>
+                    <button id="open-admin-panel-btn" class="control-btn control-btn-secondary hidden">Админ-панель</button>
                     <button id="release-device-btn" class="control-btn control-btn-secondary" disabled>Освободить дрон</button>
                     <button id="logout-btn" class="control-btn control-btn-danger">Выйти</button>
 
@@ -71,6 +72,121 @@
                     </div>
                 </div>
                 <div id="device-list" class="device-list"></div>
+            </section>
+
+            <section id="admin-screen" class="info-card admin-screen hidden">
+                <div class="panel-header panel-header-stack panel-header-device-list">
+                    <div>
+                        <h2>Админ-панель</h2>
+                        <p class="panel-note">Создание операторов, выпуск платформ и управление доступом к системе.</p>
+                    </div>
+                    <div class="device-list-actions">
+                        <button id="close-admin-panel-btn" class="control-btn control-btn-secondary">К пульту</button>
+                    </div>
+                </div>
+
+                <div class="admin-overview">
+                    <article class="admin-overview-card">
+                        <span class="admin-overview-label">Пользователи</span>
+                        <strong id="admin-users-count">0</strong>
+                        <span class="admin-overview-meta">активных учётных записей</span>
+                    </article>
+                    <article class="admin-overview-card">
+                        <span class="admin-overview-label">Администраторы</span>
+                        <strong id="admin-admins-count">0</strong>
+                        <span class="admin-overview-meta">с доступом к панели</span>
+                    </article>
+                    <article class="admin-overview-card">
+                        <span class="admin-overview-label">Платформы</span>
+                        <strong id="admin-devices-count">0</strong>
+                        <span class="admin-overview-meta">зарегистрировано в системе</span>
+                    </article>
+                </div>
+
+                <div class="admin-tabs">
+                    <button id="admin-users-tab" class="control-btn control-btn-secondary is-active">Пользователи</button>
+                    <button id="admin-devices-tab" class="control-btn control-btn-secondary">Платформы</button>
+                </div>
+
+                <div id="admin-users-panel" class="admin-panel">
+                    <div class="admin-grid">
+                        <section class="admin-card admin-card-form">
+                            <div class="admin-section-head">
+                                <div>
+                                    <h3>Новый пользователь</h3>
+                                    <p class="panel-note">Создайте операторскую или административную учётную запись.</p>
+                                </div>
+                            </div>
+                            <form id="admin-user-form" class="admin-form">
+                                <label>
+                                    <span>Логин</span>
+                                    <input id="admin-user-username" type="text" placeholder="Например, operator_02" required>
+                                </label>
+                                <label>
+                                    <span>Пароль</span>
+                                    <input id="admin-user-password" type="text" placeholder="Временный пароль для выдачи" required>
+                                </label>
+                                <div class="admin-form-inline">
+                                    <label>
+                                        <span>Роль</span>
+                                        <select id="admin-user-role">
+                                            <option value="operator">Оператор</option>
+                                            <option value="admin">Администратор</option>
+                                        </select>
+                                    </label>
+                                    <button type="submit" class="control-btn">Создать пользователя</button>
+                                </div>
+                            </form>
+                        </section>
+
+                        <section class="admin-card">
+                            <div class="admin-card-head admin-card-head-spread">
+                                <div>
+                                    <h3>Пользователи</h3>
+                                    <p class="panel-note">Список учётных записей, которые могут входить в систему.</p>
+                                </div>
+                                <button id="refresh-admin-users-btn" class="control-btn control-btn-secondary">Обновить</button>
+                            </div>
+                            <div id="admin-users-list" class="admin-list"></div>
+                        </section>
+                    </div>
+                </div>
+
+                <div id="admin-devices-panel" class="admin-panel hidden">
+                    <div class="admin-grid">
+                        <section class="admin-card admin-card-form">
+                            <div class="admin-section-head">
+                                <div>
+                                    <h3>Новая платформа</h3>
+                                    <p class="panel-note">Создайте запись устройства и получите <code>device_id</code> и секрет для прошивки.</p>
+                                </div>
+                            </div>
+                            <form id="admin-device-form" class="admin-form">
+                                <label>
+                                    <span>Название</span>
+                                    <input id="admin-device-name" type="text" placeholder="Например, Платформа 2" required>
+                                </label>
+                                <label>
+                                    <span>Device ID (необязательно)</span>
+                                    <input id="admin-device-id" type="text" placeholder="Если пусто, будет создан автоматически">
+                                </label>
+                                <button type="submit" class="control-btn">Создать платформу</button>
+                            </form>
+                            <div id="admin-device-secret-box" class="admin-secret-box hidden"></div>
+                        </section>
+
+                        <section class="admin-card">
+                            <div class="admin-card-head admin-card-head-spread">
+                                <div>
+                                    <h3>Платформы</h3>
+                                    <p class="panel-note">Устройства, которые могут подключаться к серверу и выдаваться операторам.</p>
+                                </div>
+                                <button id="refresh-admin-devices-btn" class="control-btn control-btn-secondary">Обновить</button>
+                            </div>
+                            <div id="admin-devices-list" class="admin-list"></div>
+                        </section>
+                    </div>
+                </div>
             </section>
 
             <main id="cockpit-dashboard" class="dashboard hidden">
@@ -190,7 +306,7 @@
                     <section class="info-card wifi-card">
                         <div class="panel-header panel-header-stack">
                             <div>
-                                <h2>Wi-Fi карта</h2>
+                                <h2>Wi‑Fi карта</h2>
                                 <p class="panel-note">Сканирование, live heatmap и сохранённые замеры</p>
                             </div>
                             <label class="checkbox-chip">
@@ -243,6 +359,6 @@
         </div>
     </div>
 
-    <script src="/static/js/app.js?v=2026-05-15-2"></script>
+    <script src="/static/js/app.js?v=2026-05-16-6"></script>
 </body>
 </html>

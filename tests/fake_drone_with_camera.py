@@ -32,10 +32,13 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+DEFAULT_DEVICE_ID = "bpna-001"
+DEFAULT_DEVICE_SECRET = "JOOGmlUysuw6_l0-sIFnKCZ6ht3VCnev"
+
 
 @dataclass
 class DroneState:
-    device_id: str = "bpna-01"
+    device_id: str = DEFAULT_DEVICE_ID
     battery: float = 85.0
     x: float = 0.0
     y: float = 0.0
@@ -52,7 +55,8 @@ class FakeDroneWithCamera:
         self,
         host: str = "localhost",
         port: int = 8000,
-        secret: str = "change-me-device",
+        device_id: str = DEFAULT_DEVICE_ID,
+        secret: str = DEFAULT_DEVICE_SECRET,
         camera_id: int = 0,
         width: int = 640,
         height: int = 480,
@@ -62,6 +66,7 @@ class FakeDroneWithCamera:
     ) -> None:
         self.host = host
         self.port = port
+        self.device_id = device_id
         self.secret = secret
         self.camera_id = camera_id
         self.width = width
@@ -70,9 +75,12 @@ class FakeDroneWithCamera:
         self.jpeg_quality = jpeg_quality
         self.synthetic_video = synthetic_video
 
-        self.ws_url = f"ws://{self.host}:{self.port}/ws/esp?secret={self.secret}"
+        self.ws_url = (
+            f"ws://{self.host}:{self.port}/ws/esp"
+            f"?device_id={self.device_id}&secret={self.secret}"
+        )
 
-        self.state = DroneState()
+        self.state = DroneState(device_id=device_id)
         self.cap: Optional[cv2.VideoCapture] = None
         self.websocket: Optional[websockets.WebSocketClientProtocol] = None
         self.running = False
@@ -427,9 +435,14 @@ async def main() -> None:
     parser.add_argument("--host", default="localhost", help="Gateway host")
     parser.add_argument("--port", type=int, default=8000, help="Gateway port")
     parser.add_argument(
+        "--device-id",
+        default=DEFAULT_DEVICE_ID,
+        help="Device ID registered in the admin panel",
+    )
+    parser.add_argument(
         "--secret",
-        default="change-me-device",
-        help="Must match DEVICE_SECRET in docker-compose.microservices.yml",
+        default=DEFAULT_DEVICE_SECRET,
+        help="Secret for the selected device_id from the admin panel",
     )
     parser.add_argument("--camera", "-c", type=int, default=0, help="Camera index")
     parser.add_argument("--width", "-w", type=int, default=640, help="Frame width")
@@ -451,7 +464,13 @@ async def main() -> None:
     args = parser.parse_args()
 
     logger.info("=" * 60)
-    logger.info("Fake drone will connect to: ws://%s:%s/ws/esp", args.host, args.port)
+    logger.info(
+        "Fake drone will connect to: ws://%s:%s/ws/esp?device_id=%s&secret=***",
+        args.host,
+        args.port,
+        args.device_id,
+    )
+    logger.info("Device ID: %s", args.device_id)
     logger.info("Camera index: %s", args.camera)
     logger.info("Resolution: %sx%s", args.width, args.height)
     logger.info("FPS: %s", args.fps)
@@ -461,6 +480,7 @@ async def main() -> None:
     emulator = FakeDroneWithCamera(
         host=args.host,
         port=args.port,
+        device_id=args.device_id,
         secret=args.secret,
         camera_id=args.camera,
         width=args.width,

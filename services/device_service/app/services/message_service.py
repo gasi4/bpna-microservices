@@ -19,7 +19,7 @@ async def handle_text_message(websocket: WebSocket, device_id: str, raw: str) ->
     device_state = state.ensure_device_state(device_id)
 
     if msg_type == "telemetry":
-        data.setdefault("device_id", device_id)
+        data["device_id"] = device_id
         device_state["last_seen"] = datetime.now(timezone.utc).isoformat()
         device_state["last_data"] = data
         await save_telemetry(data)
@@ -33,7 +33,7 @@ async def handle_text_message(websocket: WebSocket, device_id: str, raw: str) ->
             ),
         )
     elif msg_type == "wifi_measurement":
-        data.setdefault("device_id", device_id)
+        data["device_id"] = device_id
         await save_wifi_measurement(data)
     elif msg_type == "ping":
         await websocket.send_text(json.dumps({"type": "pong"}))

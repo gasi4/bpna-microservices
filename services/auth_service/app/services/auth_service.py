@@ -1,5 +1,5 @@
 import secrets
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import hash_password, verify_password
@@ -60,10 +60,17 @@ async def deactivate_user(db: AsyncSession, user_id: int) -> bool:
     return True
 
 
-async def list_devices(db: AsyncSession) -> list[Device]:
-    result = await db.execute(
-        select(Device).where(Device.is_active == True).order_by(Device.name, Device.device_id)
-    )
+async def delete_user(db: AsyncSession, user_id: int) -> bool:
+    result = await db.execute(delete(User).where(User.id == user_id))
+    await db.commit()
+    return bool(result.rowcount)
+
+
+async def list_devices(db: AsyncSession, include_inactive: bool = False) -> list[Device]:
+    query = select(Device).order_by(Device.name, Device.device_id)
+    if not include_inactive:
+        query = query.where(Device.is_active == True)
+    result = await db.execute(query)
     return list(result.scalars().all())
 
 
@@ -96,6 +103,12 @@ async def deactivate_device(db: AsyncSession, device_id: str) -> bool:
     device.is_active = False
     await db.commit()
     return True
+
+
+async def delete_device(db: AsyncSession, device_id: str) -> bool:
+    result = await db.execute(delete(Device).where(Device.device_id == device_id))
+    await db.commit()
+    return bool(result.rowcount)
 
 
 async def validate_device_credentials(db: AsyncSession, device_id: str, secret: str) -> Device | None:

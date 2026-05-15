@@ -1,3 +1,5 @@
+import asyncio
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -11,13 +13,46 @@ from app.routers.health import router as health_router
 from app.services.auth_service import create_default_users
 
 
+logger = logging.getLogger(__name__)
+
+
+async def run_startup_setup() -> None:
+    last_error: Exception | None = None
+
+    for attempt in range(1, 16):
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+                await conn.exec_driver_sql(
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS role VARCHAR(20) DEFAULT 'operator'"
+                )
+                await conn.exec_driver_sql(
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+                )
+                await conn.exec_driver_sql(
+                    "UPDATE users SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL"
+                )
+                await conn.exec_driver_sql(
+                    "ALTER TABLE devices ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP"
+                )
+                await conn.exec_driver_sql(
+                    "UPDATE devices SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL"
+                )
+            async with SessionLocal() as db:
+                await create_default_users(db)
+            return
+        except Exception as exc:  # noqa: BLE001
+            last_error = exc
+            logger.warning("Auth startup attempt %s failed: %s", attempt, exc)
+            await asyncio.sleep(2)
+
+    if last_error is not None:
+        raise last_error
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-        await conn.exec_driver_sql("ALTER TABLE users ADD COLUMN IF NOT EXISTS role VARCHAR(20) DEFAULT 'operator'")
-    async with SessionLocal() as db:
-        await create_default_users(db)
+    await run_startup_setup()
     yield
     await engine.dispose()
 
