@@ -70,6 +70,7 @@ services:
     environment:
       AUTH_SERVICE_URL: http://auth-service:8000
       DEVICE_SERVICE_URL: http://device-service:8000
+      WIFI_SERVICE_URL: http://wifi-service:8000
     ports:
       - "8004:8000"
     depends_on:

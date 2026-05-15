@@ -1,4 +1,5 @@
 from app.core.device_client import dispatch_command
+from app.core.wifi_client import notify_scan_step
 from app.schemas.command import CommandCreate, CommandResponse
 from app.services.autopilot_state import autopilot_state, set_autopilot
 
@@ -12,6 +13,8 @@ async def send_manual_command(data: CommandCreate) -> CommandResponse:
         )
 
     success = await dispatch_command(data.command.value)
+    if success:
+        await notify_scan_step(data.command.value)
     return CommandResponse(
         success=success,
         command=data.command.value,

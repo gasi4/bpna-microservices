@@ -9,4 +9,5 @@ device_state: dict = {
     "connected": False,
     "last_seen": None,
     "last_data": None,
+    "last_detection": {"boxes": [], "frame_width": 0, "frame_height": 0},
 }

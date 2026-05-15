@@ -16,6 +16,17 @@ async def broadcast_measurement(payload: dict) -> None:
     wifi_viewers.difference_update(dead)
 
 
+async def broadcast_event(payload: dict) -> None:
+    dead = set()
+    message = json.dumps(payload)
+    for client in set(wifi_viewers):
+        try:
+            await client.send_text(message)
+        except Exception:
+            dead.add(client)
+    wifi_viewers.difference_update(dead)
+
+
 async def register_wifi_viewer(websocket: WebSocket) -> None:
     await websocket.accept()
     wifi_viewers.add(websocket)

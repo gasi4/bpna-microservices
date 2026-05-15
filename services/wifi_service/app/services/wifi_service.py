@@ -1,11 +1,8 @@
-from datetime import datetime
-
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.wifi import SavedHeatmap, WiFiMeasurement
 from app.schemas.wifi import MeasurementIn
-from app.services import state
 from app.services.heatmap_service import interpolate_heatmap
 from app.services.websocket_service import broadcast_measurement
 
@@ -22,19 +19,18 @@ async def save_measurement(db: AsyncSession, data: MeasurementIn) -> WiFiMeasure
     await db.commit()
     await db.refresh(point)
 
-    payload = data.model_dump()
-    payload["created_at"] = point.created_at.isoformat()
-    state.drone_track.append(
-        {
-            "x": data.x,
-            "y": data.y,
-            "command": "measure",
-            "avoiding": False,
-            "timestamp": datetime.utcnow().isoformat(),
-        }
-    )
+    payload = {
+        'type': 'wifi_measurement',
+        **data.model_dump(),
+        'created_at': point.created_at.isoformat(),
+    }
     await broadcast_measurement(payload)
     return point
+
+
+async def save_measurement_payload(db: AsyncSession, payload: dict) -> WiFiMeasurement:
+    data = MeasurementIn(**payload)
+    return await save_measurement(db, data)
 
 
 async def get_measurements(db: AsyncSession, limit: int = 500) -> list[WiFiMeasurement]:
@@ -52,16 +48,16 @@ async def build_heatmap(
 ) -> dict:
     rows = await get_measurements(db, limit=500)
     if len(rows) < 3:
-        return {"error": "Not enough data to build heatmap", "points": []}
+        return {'error': 'Not enough data to build heatmap', 'points': []}
 
-    data = [{"x": item.x, "y": item.y, "rssi": item.rssi} for item in rows]
+    data = [{'x': item.x, 'y': item.y, 'rssi': item.rssi} for item in rows]
     return {
-        "heatmap": interpolate_heatmap(data, width_cells, height_cells, step_cm),
-        "measurements": data,
-        "width_cells": width_cells,
-        "height_cells": height_cells,
-        "step_cm": step_cm,
-        "total_points": len(data),
+        'heatmap': interpolate_heatmap(data, width_cells, height_cells, step_cm),
+        'measurements': data,
+        'width_cells': width_cells,
+        'height_cells': height_cells,
+        'step_cm': step_cm,
+        'total_points': len(data),
     }
 
 
@@ -73,7 +69,7 @@ async def clear_measurements(db: AsyncSession) -> None:
 async def save_heatmap_snapshot(db: AsyncSession, name: str) -> SavedHeatmap:
     measurements = await get_measurements(db, limit=500)
     data = [
-        {"x": item.x, "y": item.y, "rssi": item.rssi, "step_cm": item.step_cm}
+        {'x': item.x, 'y': item.y, 'rssi': item.rssi, 'step_cm': item.step_cm}
         for item in measurements
     ]
     saved = SavedHeatmap(name=name, data=data)

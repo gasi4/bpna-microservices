@@ -154,18 +154,18 @@
                             <label>Высота
                                 <input type="number" id="scan-height" value="10" min="5" max="20">
                             </label>
-                            <label>Шаг
+                            <label>???
                                 <select id="scan-step" class="select-control compact-select">
-                                    <option value="50">50 см</option>
-                                    <option value="100" selected>100 см</option>
-                                    <option value="150">150 см</option>
-                                    <option value="200">200 см</option>
+                                    <option value="50">50 ??</option>
+                                    <option value="100" selected>100 ??</option>
+                                    <option value="150">150 ??</option>
+                                    <option value="200">200 ??</option>
                                 </select>
                             </label>
-                        </div>
-
+                            <div class="toolbar-hint">????? ?????? ????? ????? ???? ??????? ??? ???????? ??????????.</div>
                         <div class="toolbar-actions">
                             <button id="start-scan-btn" class="control-btn">Старт</button>
+                            <button id="toggle-scan-autopilot-btn" class="control-btn control-btn-secondary">AUTO: OFF</button>
                             <button id="stop-scan-btn" class="control-btn control-btn-secondary">Стоп</button>
                             <button id="refresh-map-btn" class="control-btn control-btn-secondary">Обновить</button>
                             <button id="clear-track-btn" class="control-btn control-btn-secondary">Очистить трек</button>
@@ -179,6 +179,7 @@
 
                     <div class="scan-status">
                         <span id="scan-status-text">Ожидание</span>
+                        <span id="scan-mode-text">Режим: ручной</span>
                         <span id="measurement-count">Точек: 0</span>
                         <span id="last-measurement">Последний RSSI: --</span>
                     </div>

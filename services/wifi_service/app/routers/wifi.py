@@ -5,8 +5,13 @@ from app.core.auth_client import require_user, validate_ws_token
 from app.core.database import get_db
 from app.schemas.wifi import MeasurementIn
 from app.services import state
-from app.services.scan_service import start_scan as start_wifi_scan
-from app.services.scan_service import stop_scan as stop_wifi_scan
+from app.services.scan_service import (
+    get_scan_status_payload,
+    process_scan_step,
+    set_scan_mode,
+    start_scan as start_wifi_scan,
+    stop_scan as stop_wifi_scan,
+)
 from app.services.websocket_service import register_wifi_viewer
 from app.services.wifi_service import (
     build_heatmap,
@@ -22,16 +27,16 @@ from app.services.wifi_service import (
 router = APIRouter()
 
 
-@router.post("/internal/measurements")
+@router.post('/internal/measurements')
 async def save_measurement_endpoint(
     data: MeasurementIn,
     db: AsyncSession = Depends(get_db),
 ):
     point = await save_measurement(db, data)
-    return {"status": "saved", "id": point.id}
+    return {'status': 'saved', 'id': point.id}
 
 
-@router.websocket("/ws/measurements")
+@router.websocket('/ws/measurements')
 async def measurements_ws(websocket: WebSocket, token: str = Query(...)):
     if not await validate_ws_token(token):
         await websocket.close(code=1008)
@@ -39,7 +44,7 @@ async def measurements_ws(websocket: WebSocket, token: str = Query(...)):
     await register_wifi_viewer(websocket)
 
 
-@router.get("/measurements")
+@router.get('/measurements')
 async def measurements(
     limit: int = 500,
     db: AsyncSession = Depends(get_db),
@@ -48,17 +53,17 @@ async def measurements(
     rows = await get_measurements(db, limit)
     return [
         {
-            "x": item.x,
-            "y": item.y,
-            "rssi": item.rssi,
-            "step_cm": item.step_cm,
-            "created_at": item.created_at.isoformat(),
+            'x': item.x,
+            'y': item.y,
+            'rssi': item.rssi,
+            'step_cm': item.step_cm,
+            'created_at': item.created_at.isoformat(),
         }
         for item in rows
     ]
 
 
-@router.get("/heatmap")
+@router.get('/heatmap')
 async def heatmap(
     width_cells: int = 10,
     height_cells: int = 10,
@@ -69,56 +74,81 @@ async def heatmap(
     return await build_heatmap(db, width_cells, height_cells, step_cm)
 
 
-@router.get("/track")
+@router.get('/track')
 async def get_track(user: dict = Depends(require_user)):
-    return {"track": state.drone_track}
+    return {'track': state.drone_track}
 
 
-@router.delete("/track")
+@router.get('/status')
+async def scan_status(user: dict = Depends(require_user)):
+    return get_scan_status_payload()
+
+
+@router.delete('/track')
 async def clear_track(user: dict = Depends(require_user)):
     state.drone_track.clear()
-    return {"status": "cleared"}
+    return {'status': 'cleared'}
 
 
-@router.post("/start")
+@router.post('/start')
 async def start_scan(
     width: int = 10,
     height: int = 10,
     step_cm: int = 100,
+    mode: str = 'manual',
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_user),
 ):
-    return await start_wifi_scan(db, width, height, step_cm)
+    mode = mode if mode in {'manual', 'autopilot'} else 'manual'
+    return await start_wifi_scan(db, width, height, step_cm, mode)
 
 
-@router.post("/stop")
+@router.post('/mode')
+async def update_scan_mode(
+    mode: str = 'manual',
+    user: dict = Depends(require_user),
+):
+    mode = mode if mode in {'manual', 'autopilot'} else 'manual'
+    return await set_scan_mode(mode)
+
+
+@router.post('/stop')
 async def stop_scan(user: dict = Depends(require_user)):
     return await stop_wifi_scan()
 
 
-@router.post("/save")
+@router.post('/internal/step')
+async def internal_step(
+    data: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    command = str(data.get('command') or '')
+    return await process_scan_step(db, command, source='manual')
+
+
+@router.post('/save')
 async def save_heatmap(
     name: str,
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_user),
 ):
     saved = await save_heatmap_snapshot(db, name)
-    return {"status": "saved", "id": saved.id, "name": name}
+    return {'status': 'saved', 'id': saved.id, 'name': name}
 
 
-@router.get("/saved")
+@router.get('/saved')
 async def saved_heatmaps(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_user),
 ):
     rows = await get_saved_heatmaps(db)
     return [
-        {"id": item.id, "name": item.name, "created_at": item.created_at.isoformat()}
+        {'id': item.id, 'name': item.name, 'created_at': item.created_at.isoformat()}
         for item in rows
     ]
 
 
-@router.get("/saved/{heatmap_id}")
+@router.get('/saved/{heatmap_id}')
 async def saved_heatmap(
     heatmap_id: int,
     db: AsyncSession = Depends(get_db),
@@ -126,19 +156,19 @@ async def saved_heatmap(
 ):
     item = await get_saved_heatmap(db, heatmap_id)
     if item is None:
-        raise HTTPException(status_code=404, detail="Heatmap not found")
+        raise HTTPException(status_code=404, detail='Heatmap not found')
     return {
-        "id": item.id,
-        "name": item.name,
-        "data": item.data,
-        "created_at": item.created_at.isoformat(),
+        'id': item.id,
+        'name': item.name,
+        'data': item.data,
+        'created_at': item.created_at.isoformat(),
     }
 
 
-@router.delete("/measurements")
+@router.delete('/measurements')
 async def clear_measurements(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_user),
 ):
     await clear_wifi_measurements(db)
-    return {"status": "cleared"}
+    return {'status': 'cleared'}

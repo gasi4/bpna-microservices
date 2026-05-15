@@ -36,6 +36,7 @@ let currentHeatmap = null;
 let isScanning = false;
 let droneTrack = [];
 let showTrack = true;
+let activeScanMode = "manual";
 
 function getAuthToken() {
     return sessionStorage.getItem("access_token");
@@ -200,7 +201,7 @@ function resizeSquareCanvas(id) {
 
 function resizeHeatmapCanvases() {
     resizeSquareCanvas("heatmap-canvas");
-    }
+}
 
 function getFitRect(containerWidth, containerHeight, sourceWidth, sourceHeight) {
     const scale = Math.min(containerWidth / sourceWidth, containerHeight / sourceHeight);
@@ -249,6 +250,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 
     await loadHeatmap();
     await loadDroneTrack();
+    await loadScanStatus();
 
     window.addEventListener("resize", () => {
         resizeVideoCanvases();
@@ -998,9 +1000,17 @@ function connectWiFiWebSocket() {
                 if (currentHeatmap) {
                     drawHeatmap(currentHeatmap, "heatmap-canvas");
                 }
+            } else if (data.type === "scan_status") {
+                applyScanStatus(data);
+            } else if (data.type === "scan_notice") {
+                setText("scan-status-text", data.message || "Сканирование обновлено");
             } else if (data.type === "scan_complete") {
                 isScanning = false;
-                setText("scan-status-text", "Сканирование завершено");
+                activeScanMode = "manual";
+                autopilotEnabled = false;
+                updateScanAutopilotButton();
+                setText("scan-mode-text", "Режим: ручной");
+                setText("scan-status-text", data.completed ? "Сканирование завершено" : "Сканирование остановлено");
                 loadHeatmap();
                 loadDroneTrack();
             }
@@ -1048,6 +1058,14 @@ function setupWifiControls() {
 
     const clearTrackButton = document.getElementById("clear-track-btn");
     if (clearTrackButton) clearTrackButton.onclick = clearDroneTrack;
+
+    const toggleScanAutopilotButton = document.getElementById("toggle-scan-autopilot-btn");
+    if (toggleScanAutopilotButton) toggleScanAutopilotButton.onclick = toggleScanAutopilot;
+
+    const downloadButton = document.getElementById("download-heatmap-btn");
+    if (downloadButton) downloadButton.onclick = downloadHeatmapImage;
+
+    updateScanAutopilotButton();
 }
 
 async function loadHeatmap() {
@@ -1181,18 +1199,36 @@ function updateMeasurementCount(exactValue = null) {
     setText("measurement-count", `Точек: ${nextValue}`);
 }
 
+function releaseManualControls() {
+    pressedKeys.clear();
+    document.querySelectorAll(".key-chip").forEach((chip) => chip.classList.remove("active"));
+    stopCommandLoop();
+    updateMotorStatus("stop");
+}
+
+function updateScanAutopilotButton() {
+    const button = document.getElementById("toggle-scan-autopilot-btn");
+    if (!button) {
+        return;
+    }
+
+    button.textContent = `Автозмейка: ${autopilotEnabled ? "ВКЛ" : "ВЫКЛ"}`;
+    button.classList.toggle("active", autopilotEnabled);
+    button.disabled = !isScanning;
+}
+
 async function startScan() {
     try {
         const width = document.getElementById("scan-width")?.value || 10;
         const height = document.getElementById("scan-height")?.value || 10;
         const step = document.getElementById("scan-step")?.value || 100;
 
-        isScanning = true;
-        setText("scan-status-text", "Сканирование...");
-
-        const res = await apiFetch(`/api/wifi/start?width=${width}&height=${height}&step_cm=${step}`, { method: "POST" });
+        releaseManualControls();
+        const res = await apiFetch(`/api/wifi/start?width=${width}&height=${height}&step_cm=${step}&mode=manual`, { method: "POST" });
         if (!res.ok) {
             isScanning = false;
+            autopilotEnabled = false;
+            updateScanAutopilotButton();
             setText("scan-status-text", "Ошибка запуска");
             return;
         }
@@ -1200,13 +1236,51 @@ async function startScan() {
         const data = await res.json();
         if (data.status === "error") {
             isScanning = false;
+            autopilotEnabled = false;
+            updateScanAutopilotButton();
             setText("scan-status-text", "Ошибка запуска");
             window.alert(data.message || "Не удалось запустить сканирование");
+            return;
         }
+
+        applyScanStatus(data);
+        await loadHeatmap();
+        await loadDroneTrack();
     } catch (error) {
         isScanning = false;
+        autopilotEnabled = false;
+        updateScanAutopilotButton();
         setText("scan-status-text", "Ошибка запуска");
         console.error("Start scan error:", error);
+    }
+}
+
+async function toggleScanAutopilot() {
+    if (!isScanning) {
+        window.alert("Сначала запустите сканирование");
+        return;
+    }
+
+    const nextMode = autopilotEnabled ? "manual" : "autopilot";
+
+    try {
+        releaseManualControls();
+        const res = await apiFetch(`/api/wifi/mode?mode=${nextMode}`, { method: "POST" });
+        if (!res.ok) {
+            setText("scan-status-text", "Не удалось переключить режим");
+            return;
+        }
+
+        const data = await res.json();
+        if (data.status === "error") {
+            setText("scan-status-text", data.message || "Не удалось переключить режим");
+            return;
+        }
+
+        applyScanStatus(data);
+    } catch (error) {
+        console.error("Toggle scan autopilot error:", error);
+        setText("scan-status-text", "Ошибка переключения режима");
     }
 }
 
@@ -1214,12 +1288,32 @@ async function stopScan() {
     try {
         const res = await apiFetch("/api/wifi/stop", { method: "POST" });
         if (res.ok) {
-            isScanning = false;
+            const data = await res.json();
+            applyScanStatus(data);
             setText("scan-status-text", "Сканирование остановлено");
         }
     } catch (error) {
         console.error("Stop scan error:", error);
     }
+}
+
+function applyScanStatus(data) {
+    activeScanMode = data.mode || "manual";
+    isScanning = Boolean(data.running);
+    autopilotEnabled = isScanning && activeScanMode === "autopilot";
+    updateScanAutopilotButton();
+    setText("scan-mode-text", activeScanMode === "autopilot" ? "Режим: автозмейка" : "Режим: ручной");
+
+    if (!isScanning) {
+        setText("scan-status-text", "Ожидание");
+        return;
+    }
+
+    const coords = `(${data.x ?? 0}, ${data.y ?? 0})`;
+    setText(
+        "scan-status-text",
+        activeScanMode === "autopilot" ? `Автозмейка: ${coords}` : `Ручной сбор: ${coords}`
+    );
 }
 
 async function clearData() {
@@ -1362,6 +1456,19 @@ async function loadDroneTrack() {
         }
     } catch (error) {
         console.error("Drone track load error:", error);
+    }
+}
+
+async function loadScanStatus() {
+    try {
+        const res = await apiFetch("/api/wifi/status");
+        if (!res.ok) {
+            return;
+        }
+        const data = await res.json();
+        applyScanStatus(data);
+    } catch (error) {
+        console.error("Scan status load error:", error);
     }
 }
 
