@@ -1,0 +1,197 @@
+﻿<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Управление платформой</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="container cockpit-layout">
+        <header class="header">
+            <div class="header-copy">
+                <p class="eyebrow">Локальный пульт</p>
+                <h1>Управление платформой</h1>
+            </div>
+            <div class="connection-status">
+                <span id="status-indicator" class="status-dot offline"></span>
+                <span id="status-text">Не подключено</span>
+            </div>
+        </header>
+
+        <main class="dashboard">
+            <section class="stage-panel">
+                <div class="video-shell">
+                    <div class="video-container">
+                        <canvas id="video-canvas"></canvas>
+                        <canvas id="detection-canvas"></canvas>
+
+                        <div class="video-overlay top-overlay">
+                            <div class="telemetry-strip">
+                                <div class="telemetry-pill">
+                                    <span class="pill-label">Устройство</span>
+                                    <strong id="device-id">-</strong>
+                                </div>
+                                <div class="telemetry-pill">
+                                    <span class="pill-label">Поток</span>
+                                    <strong id="esp-status">Offline</strong>
+                                </div>
+                                <div class="telemetry-pill">
+                                    <span class="pill-label">FPS</span>
+                                    <strong id="fps">0</strong>
+                                </div>
+                                <div class="telemetry-pill">
+                                    <span class="pill-label">Темп.</span>
+                                    <strong id="temperature">-</strong>
+                                </div>
+                                <div class="telemetry-pill">
+                                    <span class="pill-label">RSSI</span>
+                                    <strong id="wifi-rssi">-</strong>
+                                </div>
+                                <div class="telemetry-pill">
+                                    <span class="pill-label">Ping</span>
+                                    <strong id="wifi-ping">-</strong>
+                                </div>
+                                <div class="telemetry-pill">
+                                    <span class="pill-label">Батарея</span>
+                                    <strong id="battery-level">-</strong>
+                                </div>
+                                
+                            </div>
+
+                            <div class="overlay-actions">
+                                <button id="detection-toggle" class="control-btn control-btn-ghost active" onclick="toggleDetection()">
+                                    Детекция: ВКЛ
+                                </button>
+
+                                
+                            </div>
+                        </div>
+
+                        <div id="no-signal" class="no-signal">
+                            <div class="no-signal-icon">NO SIGNAL</div>
+                            <div>Нет видеопотока</div>
+                            <div class="hint">Подключите эмулятор или ESP32-CAM к локальному серверу</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="stage-footer">
+                    <div class="stage-status">
+                        <div class="status-block">
+                            <span class="caption">Детекция</span>
+                            <strong id="detection-summary">Детекция включена, ожидание объектов</strong>
+                        </div>
+                        
+                    </div>
+
+                    <div class="pilot-strip">
+                        <div class="key-cluster" aria-label="Клавиши управления">
+                            <div class="key-chip" data-key="arrowup">↑</div>
+                            <div class="key-chip" data-key="arrowleft">←</div>
+                            <div class="key-chip" data-key="arrowdown">↓</div>
+                            <div class="key-chip" data-key="arrowright">→</div>
+                        </div>
+
+                        <div class="pilot-meta">
+                            <span class="hint-text">Управление со стрелок клавиатуры, удержание клавиши держит команду активной</span>
+                            <div class="motor-status-inline">
+                                <span>Левый мотор <strong id="motor-left">STOP</strong></span>
+                                <span>Правый мотор <strong id="motor-right">STOP</strong></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <aside class="side-panel">
+                <section class="info-card">
+                    <div class="panel-header">
+                        <div>
+                            <h2>Состояние борта</h2>
+                            <p class="panel-note">Ключевая телеметрия и сетевой статус</p>
+                        </div>
+                        <span class="stamp" id="created-at">-</span>
+                    </div>
+
+                    <div class="detail-grid">
+                        <div class="detail-card">
+                            <span class="detail-label">Uptime</span>
+                            <strong id="uptime">-</strong>
+                        </div>
+                        <div class="detail-card">
+                            <span class="detail-label">CPU load</span>
+                            <strong id="cpu-load">-</strong>
+                        </div>
+                        <div class="detail-card">
+                            <span class="detail-label">Свободная память</span>
+                            <strong id="free-heap">-</strong>
+                        </div>
+                        <div class="detail-card">
+                            <span class="detail-label">Канал</span>
+                            <strong id="link-quality-copy">-</strong>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="info-card wifi-card">
+                    <div class="panel-header panel-header-stack">
+                        <div>
+                            <h2>Wi-Fi карта</h2>
+                            <p class="panel-note">Сканирование, live heatmap и сохранённые замеры</p>
+                        </div>
+                        <label class="checkbox-chip">
+                            <input type="checkbox" id="show-track-checkbox" checked>
+                            <span>Показывать трек</span>
+                        </label>
+                    </div>
+
+                    <div class="scan-toolbar">
+                        <div class="toolbar-group">
+                            <label>Ширина
+                                <input type="number" id="scan-width" value="10" min="5" max="20">
+                            </label>
+                            <label>Высота
+                                <input type="number" id="scan-height" value="10" min="5" max="20">
+                            </label>
+                            <label>Шаг
+                                <select id="scan-step" class="select-control compact-select">
+                                    <option value="50">50 см</option>
+                                    <option value="100" selected>100 см</option>
+                                    <option value="150">150 см</option>
+                                    <option value="200">200 см</option>
+                                </select>
+                            </label>
+                        </div>
+
+                        <div class="toolbar-actions">
+                            <button id="start-scan-btn" class="control-btn">Старт</button>
+                            <button id="stop-scan-btn" class="control-btn control-btn-secondary">Стоп</button>
+                            <button id="refresh-map-btn" class="control-btn control-btn-secondary">Обновить</button>
+                            <button id="clear-track-btn" class="control-btn control-btn-secondary">Очистить трек</button>
+                            <button id="clear-data-btn" class="control-btn control-btn-danger">Очистить точки</button>
+                        </div>
+                    </div>
+
+                    <div class="heatmap-frame">
+                        <canvas id="heatmap-canvas"></canvas>
+                    </div>
+
+                    <div class="scan-status">
+                        <span id="scan-status-text">Ожидание</span>
+                        <span id="measurement-count">Точек: 0</span>
+                        <span id="last-measurement">Последний RSSI: --</span>
+                    </div>
+
+                    <div class="download-row">
+                        <button id="download-heatmap-btn" class="control-btn">Скачать heatmap PNG</button>
+                    </div>
+                </section>
+            </aside>
+        </main>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
+

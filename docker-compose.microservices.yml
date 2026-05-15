@@ -1,0 +1,112 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: bpna_db
+      POSTGRES_USER: bpna_user
+      POSTGRES_PASSWORD: secret
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata_micro:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
+  auth-service:
+    build: ./services/auth_service
+    environment:
+      DATABASE_URL: postgresql+asyncpg://bpna_user:secret@db:5432/bpna_db
+      SECRET_KEY: your-super-secret-key-change-in-production
+      JWT_ALGORITHM: HS256
+      ACCESS_TOKEN_EXPIRE_MINUTES: 60
+    ports:
+      - "8001:8000"
+    depends_on:
+      - db
+
+  telemetry-service:
+    build: ./services/telemetry_service
+    environment:
+      DATABASE_URL: postgresql+asyncpg://bpna_user:secret@db:5432/bpna_db
+      AUTH_SERVICE_URL: http://auth-service:8000
+    ports:
+      - "8002:8000"
+    depends_on:
+      - db
+      - auth-service
+
+  detection-service:
+    build: ./services/detection_service
+    environment:
+      YOLO_MODEL_PATH: /models/yolo11s.pt
+    volumes:
+      - ./yolo11s.pt:/models/yolo11s.pt:ro
+    ports:
+      - "8006:8000"
+
+  device-service:
+    build: ./services/device_service
+    environment:
+      DEVICE_SECRET: change-me-device
+      AUTH_SERVICE_URL: http://auth-service:8000
+      TELEMETRY_SERVICE_URL: http://telemetry-service:8000
+      WIFI_SERVICE_URL: http://wifi-service:8000
+      DETECTION_SERVICE_URL: http://detection-service:8000
+    ports:
+      - "8003:8000"
+    depends_on:
+      - auth-service
+      - telemetry-service
+      - wifi-service
+      - detection-service
+
+  control-service:
+    build: ./services/control_service
+    environment:
+      AUTH_SERVICE_URL: http://auth-service:8000
+      DEVICE_SERVICE_URL: http://device-service:8000
+    ports:
+      - "8004:8000"
+    depends_on:
+      - auth-service
+      - device-service
+
+  wifi-service:
+    build: ./services/wifi_service
+    environment:
+      DATABASE_URL: postgresql+asyncpg://bpna_user:secret@db:5432/bpna_db
+      AUTH_SERVICE_URL: http://auth-service:8000
+      DEVICE_SERVICE_URL: http://device-service:8000
+    ports:
+      - "8005:8000"
+    depends_on:
+      - db
+      - auth-service
+
+  api-gateway:
+    build: ./services/api_gateway
+    environment:
+      AUTH_SERVICE_URL: http://auth-service:8000
+      TELEMETRY_SERVICE_URL: http://telemetry-service:8000
+      CONTROL_SERVICE_URL: http://control-service:8000
+      WIFI_SERVICE_URL: http://wifi-service:8000
+      DEVICE_WS_URL: ws://device-service:8000
+      WIFI_WS_URL: ws://wifi-service:8000
+    volumes:
+      - ./static:/static:ro
+    ports:
+      - "8000:8000"
+    depends_on:
+      - auth-service
+      - telemetry-service
+      - control-service
+      - wifi-service
+      - device-service
+
+volumes:
+  pgdata_micro:
