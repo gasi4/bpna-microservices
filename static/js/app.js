@@ -37,6 +37,22 @@ let isScanning = false;
 let droneTrack = [];
 let showTrack = true;
 let activeScanMode = "manual";
+let flashLightEnabled = false;
+
+function getScanConfig() {
+    const widthCm = Math.max(100, Number(document.getElementById("scan-width")?.value || 1000));
+    const heightCm = Math.max(100, Number(document.getElementById("scan-height")?.value || 1000));
+    const stepCm = Math.max(10, Number(document.getElementById("scan-step")?.value || 100));
+
+    return {
+        widthCm,
+        heightCm,
+        stepCm,
+        widthCells: Math.max(1, Math.ceil(widthCm / stepCm)),
+        heightCells: Math.max(1, Math.ceil(heightCm / stepCm)),
+    };
+}
+
 
 function getAuthToken() {
     return sessionStorage.getItem("access_token");
@@ -115,6 +131,17 @@ function setText(id, value) {
     if (el) {
         el.textContent = value;
     }
+}
+
+function updateFlashlightUi() {
+    const button = document.getElementById("flashlight-toggle");
+    if (!button) {
+        return;
+    }
+
+    button.textContent = `??????: ${flashLightEnabled ? "???" : "????"}`;
+    button.classList.toggle("active", flashLightEnabled);
+    button.classList.toggle("is-active", flashLightEnabled);
 }
 
 function formatUptime(sec) {
@@ -246,6 +273,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     setupKeyboardControls();
     setupWifiControls();
     updateDetectionUi();
+    updateFlashlightUi();
     updateVideoStatus();
 
     await loadHeatmap();
@@ -684,6 +712,8 @@ function renderTelemetry(state) {
         setText("created-at", "-");
         setText("battery-level", "-");
         setText("link-quality-copy", "-");
+        flashLightEnabled = false;
+        updateFlashlightUi();
 
         const linkBadge = document.querySelector("#wifi-link .status-badge");
         if (linkBadge) {
@@ -707,6 +737,8 @@ function renderTelemetry(state) {
     setText("created-at", state.last_seen || data.created_at || "-");
     setText("battery-level", data.battery != null ? `${Number(data.battery).toFixed(0)}%` : "-");
     setText("link-quality-copy", quality);
+    flashLightEnabled = Boolean(data.flash_led);
+    updateFlashlightUi();
 
     const linkBadge = document.querySelector("#wifi-link .status-badge");
     if (linkBadge) {
@@ -777,25 +809,48 @@ function commandByKey(key) {
     return commands[key];
 }
 
+async function sendDeviceCommand(command) {
+    const res = await apiFetch("/api/device/command", {
+        method: "POST",
+        body: JSON.stringify({ command }),
+    });
+
+    if (!res.ok) {
+        console.error("Command failed", res.status);
+        return false;
+    }
+
+    return true;
+}
+
 async function sendMotorCommand(command) {
     if (autopilotEnabled) {
         return;
     }
 
     try {
-        const res = await apiFetch("/api/device/command", {
-            method: "POST",
-            body: JSON.stringify({ command }),
-        });
-
-        if (!res.ok) {
-            console.error("Command failed", res.status);
+        const ok = await sendDeviceCommand(command);
+        if (!ok) {
             return;
         }
 
         updateMotorStatus(command);
     } catch (error) {
         console.error("Command error:", error);
+    }
+}
+
+async function toggleFlashlight() {
+    try {
+        const ok = await sendDeviceCommand("flashlight-toggle");
+        if (!ok) {
+            return;
+        }
+
+        flashLightEnabled = !flashLightEnabled;
+        updateFlashlightUi();
+    } catch (error) {
+        console.error("Flashlight command error:", error);
     }
 }
 
@@ -996,22 +1051,22 @@ function connectWiFiWebSocket() {
             if (data.type === "wifi_measurement") {
                 measurements.push(data);
                 updateMeasurementCount();
-                setText("last-measurement", `Last RSSI: ${data.rssi} dBm`);
+                setText("last-measurement", `????????? RSSI: ${data.rssi} dBm`);
                 await loadHeatmap();
                 await loadDroneTrack();
             } else if (data.type === "scan_status") {
                 applyScanStatus(data);
                 await loadDroneTrack();
             } else if (data.type === "scan_notice") {
-                setText("scan-status-text", data.message || "Scan updated");
+                setText("scan-status-text", data.message || "???????????? ?????????");
                 await loadDroneTrack();
             } else if (data.type === "scan_complete") {
                 isScanning = false;
                 activeScanMode = "manual";
                 autopilotEnabled = false;
                 updateScanAutopilotButton();
-                setText("scan-mode-text", "Mode: manual");
-                setText("scan-status-text", data.completed ? "Scan complete" : "Scan stopped");
+                setText("scan-mode-text", "?????: ??????");
+                setText("scan-status-text", data.completed ? "???????????? ?????????" : "???????????? ???????????");
                 await loadHeatmap();
                 await loadDroneTrack();
             }
@@ -1071,11 +1126,9 @@ function setupWifiControls() {
 
 async function loadHeatmap() {
     try {
-        const width = document.getElementById("scan-width")?.value || 10;
-        const height = document.getElementById("scan-height")?.value || 10;
-        const step = document.getElementById("scan-step")?.value || 100;
+        const { widthCells, heightCells, stepCm } = getScanConfig();
 
-        const res = await apiFetch(`/api/wifi/heatmap?width_cells=${width}&height_cells=${height}&step_cm=${step}`);
+        const res = await apiFetch(`/api/wifi/heatmap?width_cells=${widthCells}&height_cells=${heightCells}&step_cm=${stepCm}`);
         const data = await res.json();
 
         if (data.error) {
@@ -1165,8 +1218,7 @@ function drawGridOnly(canvasId) {
     const context = canvasEl.getContext("2d");
     const width = canvasEl.width / (window.devicePixelRatio || 1);
     const height = canvasEl.height / (window.devicePixelRatio || 1);
-    const gridCols = Number(document.getElementById("scan-width")?.value || 10);
-    const gridRows = Number(document.getElementById("scan-height")?.value || 10);
+    const { widthCells: gridCols, heightCells: gridRows } = getScanConfig();
     const cellW = width / Math.max(1, gridCols);
     const cellH = height / Math.max(1, gridRows);
 
@@ -1220,19 +1272,17 @@ function updateScanAutopilotButton() {
         return;
     }
 
-    button.textContent = `Автозмейка: ${autopilotEnabled ? "ВКЛ" : "ВЫКЛ"}`;
+    button.textContent = `??????????: ${autopilotEnabled ? "???" : "????"}`;
     button.classList.toggle("active", autopilotEnabled);
     button.disabled = !isScanning;
 }
 
 async function startScan() {
     try {
-        const width = document.getElementById("scan-width")?.value || 10;
-        const height = document.getElementById("scan-height")?.value || 10;
-        const step = document.getElementById("scan-step")?.value || 100;
+        const { widthCells, heightCells, stepCm } = getScanConfig();
 
         releaseManualControls();
-        const res = await apiFetch(`/api/wifi/start?width=${width}&height=${height}&step_cm=${step}&mode=manual`, { method: "POST" });
+        const res = await apiFetch(`/api/wifi/start?width=${widthCells}&height=${heightCells}&step_cm=${stepCm}&mode=manual`, { method: "POST" });
         if (!res.ok) {
             isScanning = false;
             autopilotEnabled = false;
@@ -1310,7 +1360,7 @@ function applyScanStatus(data) {
     isScanning = Boolean(data.running);
     autopilotEnabled = isScanning && activeScanMode === "autopilot";
     updateScanAutopilotButton();
-    setText("scan-mode-text", activeScanMode === "autopilot" ? "Режим: автозмейка" : "Режим: ручной");
+    setText("scan-mode-text", activeScanMode === "autopilot" ? "?????: ??????????" : "?????: ??????");
 
     if (!isScanning) {
         setText("scan-status-text", "Ожидание");
@@ -1320,7 +1370,7 @@ function applyScanStatus(data) {
     const coords = `(${data.x ?? 0}, ${data.y ?? 0})`;
     setText(
         "scan-status-text",
-        activeScanMode === "autopilot" ? `Автозмейка: ${coords}` : `Ручной сбор: ${coords}`
+        activeScanMode === "autopilot" ? `??????????: ${coords}` : `?????? ??????: ${coords}`
     );
 }
 
@@ -1507,8 +1557,9 @@ function drawDroneTrack() {
     const context = canvasEl.getContext("2d");
     const width = canvasEl.width / (window.devicePixelRatio || 1);
     const height = canvasEl.height / (window.devicePixelRatio || 1);
-    const maxX = Math.max(1, Number(currentHeatmap?.width_cells || document.getElementById("scan-width")?.value || 10));
-    const maxY = Math.max(1, Number(currentHeatmap?.height_cells || document.getElementById("scan-height")?.value || 10));
+    const { widthCells, heightCells } = getScanConfig();
+    const maxX = Math.max(1, Number(currentHeatmap?.width_cells || widthCells));
+    const maxY = Math.max(1, Number(currentHeatmap?.height_cells || heightCells));
 
     if (droneTrack.length > 1) {
         let lastX = null;

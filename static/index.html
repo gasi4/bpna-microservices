@@ -61,10 +61,11 @@
 
                             <div class="overlay-actions">
                                 <button id="detection-toggle" class="control-btn control-btn-ghost active" onclick="toggleDetection()">
-                                    Детекция: ВКЛ
+                                    ????????: ???
                                 </button>
-
-                                
+                                <button id="flashlight-toggle" class="control-btn control-btn-ghost" onclick="toggleFlashlight()">
+                                    ??????: ????
+                                </button>
                             </div>
                         </div>
 
@@ -148,24 +149,21 @@
 
                     <div class="scan-toolbar">
                         <div class="toolbar-group">
-                            <label>Ширина
-                                <input type="number" id="scan-width" value="10" min="5" max="20">
+                            <label>Ширина, см
+                                <input type="number" id="scan-width" value="1000" min="100" step="10">
                             </label>
-                            <label>Высота
-                                <input type="number" id="scan-height" value="10" min="5" max="20">
+                            <label>Высота, см
+                                <input type="number" id="scan-height" value="1000" min="100" step="10">
                             </label>
-                            <label>Step
-                                <select id="scan-step" class="select-control compact-select">
-                                    <option value="50">50 cm</option>
-                                    <option value="100" selected>100 cm</option>
-                                    <option value="150">150 cm</option>
-                                    <option value="200">200 cm</option>
-                                </select>
+                            <label>Шаг, см
+                                <input type="number" id="scan-step" value="100" min="10" step="10">
                             </label>
-                            <div class="toolbar-hint">Start scan, then drive manually or enable auto-snake.</div>
+                            <div class="toolbar-hint">Запустите сканирование, затем можно вести дрон вручную или включить автопроход.</div>
+                        </div>
+
                         <div class="toolbar-actions">
                             <button id="start-scan-btn" class="control-btn">Старт</button>
-                            <button id="toggle-scan-autopilot-btn" class="control-btn control-btn-secondary">AUTO: OFF</button>
+                            <button id="toggle-scan-autopilot-btn" class="control-btn control-btn-secondary">Автопроход: ВЫКЛ</button>
                             <button id="stop-scan-btn" class="control-btn control-btn-secondary">Стоп</button>
                             <button id="refresh-map-btn" class="control-btn control-btn-secondary">Обновить</button>
                             <button id="clear-track-btn" class="control-btn control-btn-secondary">Очистить трек</button>
