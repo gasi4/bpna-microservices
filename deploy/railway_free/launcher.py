@@ -1,10 +1,11 @@
 ﻿import os
 import signal
+import socket
 import subprocess
 import sys
 import time
 from pathlib import Path
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlparse
 
 ROOT = Path('/opt/bpna')
 SERVICES_DIR = ROOT / 'services'
@@ -42,6 +43,45 @@ def derive_database_url(env: dict[str, str]) -> str | None:
         )
 
     return database_url
+
+
+def get_database_target(env: dict[str, str]) -> tuple[str, int] | None:
+    host = env.get('PGHOST')
+    port = env.get('PGPORT')
+    if host:
+        return host, int(port or '5432')
+
+    database_url = derive_database_url(env)
+    if not database_url:
+        return None
+
+    parsed = urlparse(database_url)
+    if parsed.hostname:
+        return parsed.hostname, parsed.port or 5432
+    return None
+
+
+def wait_for_database(env: dict[str, str], attempts: int = 45, delay: float = 2.0) -> None:
+    target = get_database_target(env)
+    if not target:
+        print('[launcher] no database target detected, skipping wait', flush=True)
+        return
+
+    host, port = target
+    for attempt in range(1, attempts + 1):
+        try:
+            with socket.create_connection((host, port), timeout=3):
+                print(f'[launcher] database is reachable at {host}:{port}', flush=True)
+                return
+        except OSError as exc:
+            print(
+                f'[launcher] waiting for database {host}:{port} '
+                f'({attempt}/{attempts}): {exc}',
+                flush=True,
+            )
+            time.sleep(delay)
+
+    raise RuntimeError(f'Database did not become reachable at {host}:{port}')
 
 
 def build_env(port: int, public: bool = False) -> dict[str, str]:
@@ -98,6 +138,9 @@ def handle_signal(signum, frame):
 
 signal.signal(signal.SIGINT, handle_signal)
 signal.signal(signal.SIGTERM, handle_signal)
+
+base_env = build_env(int(os.getenv('PORT', '8000')), public=True)
+wait_for_database(base_env)
 
 for name, cwd, port, public in SERVICE_SPECS:
     command = [sys.executable, '-m', 'uvicorn', 'app.main:app', '--host', '0.0.0.0' if public else '127.0.0.1', '--port', str(port)]
