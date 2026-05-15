@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+﻿FROM python:3.11-slim
 
 WORKDIR /service
 RUN apt-get update && apt-get install -y \
@@ -19,4 +19,5 @@ RUN pip install --no-cache-dir --default-timeout=600 --retries=10 ultralytics
 
 COPY app ./app
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["sh", "-c", "uvicorn app.main:app --host ${HOSTNAME:-0.0.0.0} --port ${PORT:-8000}"]
+
