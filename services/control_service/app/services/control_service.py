@@ -4,20 +4,26 @@ from app.schemas.command import CommandCreate, CommandResponse
 from app.services.autopilot_state import autopilot_state, set_autopilot
 
 
+MOVEMENT_COMMANDS = {"forward", "backward", "left-forward", "right-forward", "stop"}
+
+
 async def send_manual_command(data: CommandCreate) -> CommandResponse:
-    if autopilot_state["enabled"]:
+    command = data.command.value
+    is_movement_command = command in MOVEMENT_COMMANDS
+
+    if autopilot_state["enabled"] and is_movement_command:
         return CommandResponse(
             success=False,
-            command=data.command.value,
+            command=command,
             message="Autopilot is active. Disable autopilot before manual control.",
         )
 
-    success = await dispatch_command(data.command.value)
-    if success:
-        await notify_scan_step(data.command.value)
+    success = await dispatch_command(command)
+    if success and is_movement_command:
+        await notify_scan_step(command)
     return CommandResponse(
         success=success,
-        command=data.command.value,
+        command=command,
         message="Command sent" if success else "Device is unavailable",
     )
 
