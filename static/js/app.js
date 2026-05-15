@@ -2063,7 +2063,7 @@ function applyScanStatus(data) {
 }
 
 async function clearData() {
-    if (!window.confirm("РћС‡РёСЃС‚РёС‚СЊ РІСЃРµ Wi-Fi РёР·РјРµСЂРµРЅРёСЏ?")) {
+    if (!window.confirm("Очистить все Wi-Fi измерения?")) {
         return;
     }
 
