@@ -90,9 +90,11 @@ def build_env(port: int, public: bool = False) -> dict[str, str]:
     database_url = derive_database_url(env)
     if database_url:
         env["DATABASE_URL"] = database_url
-    model_path = ROOT / "yolo11s.pt"
-    if model_path.exists():
-        env["YOLO_MODEL_PATH"] = str(model_path)
+    for model_name in ("yolo11n.pt", "yolo11s.pt"):
+        model_path = ROOT / model_name
+        if model_path.exists():
+            env["YOLO_MODEL_PATH"] = str(model_path)
+            break
     env.setdefault("YOLO_CONFIG_DIR", "/tmp/Ultralytics")
     return env
 

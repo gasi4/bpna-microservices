@@ -43,9 +43,9 @@ services:
   detection-service:
     build: ./services/detection_service
     environment:
-      YOLO_MODEL_PATH: /models/yolo11s.pt
+      YOLO_MODEL_PATH: /models/yolo11n.pt
     volumes:
-      - ./yolo11s.pt:/models/yolo11s.pt:ro
+      - ./yolo11n.pt:/models/yolo11n.pt:ro
     ports:
       - "8006:8000"
 

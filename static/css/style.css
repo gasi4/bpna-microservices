@@ -363,12 +363,15 @@ input[type="number"] {
     place-items: center;
     width: 48px;
     height: 48px;
+    padding: 0;
     border-radius: 8px;
     background: rgba(12, 23, 39, 0.88);
     border: 1px solid rgba(142, 163, 194, 0.18);
     color: var(--muted);
     font-size: 16px;
     font-weight: 700;
+    cursor: pointer;
+    appearance: none;
     transition: border-color 0.18s ease, color 0.18s ease, background 0.18s ease, transform 0.18s ease;
 }
 

@@ -87,14 +87,14 @@
 
                     <div class="pilot-strip">
                         <div class="key-cluster" aria-label="Клавиши управления">
-                            <div class="key-chip" data-key="arrowup">↑</div>
-                            <div class="key-chip" data-key="arrowleft">←</div>
-                            <div class="key-chip" data-key="arrowdown">↓</div>
-                            <div class="key-chip" data-key="arrowright">→</div>
+                            <button type="button" class="key-chip" data-key="arrowup" data-command="forward" aria-label="Вперёд">↑</button>
+                            <button type="button" class="key-chip" data-key="arrowleft" data-command="left-forward" aria-label="Влево">←</button>
+                            <button type="button" class="key-chip" data-key="arrowdown" data-command="backward" aria-label="Назад">↓</button>
+                            <button type="button" class="key-chip" data-key="arrowright" data-command="right-forward" aria-label="Вправо">→</button>
                         </div>
 
                         <div class="pilot-meta">
-                            <span class="hint-text">Управление со стрелок клавиатуры, удержание клавиши держит команду активной</span>
+                            <span class="hint-text">Управление стрелками клавиатуры или экранными кнопками, удержание держит команду активной</span>
                             <div class="motor-status-inline">
                                 <span>Левый мотор <strong id="motor-left">STOP</strong></span>
                                 <span>Правый мотор <strong id="motor-right">STOP</strong></span>
@@ -194,4 +194,3 @@
     <script src="/static/js/app.js"></script>
 </body>
 </html>
-

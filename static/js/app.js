@@ -762,6 +762,10 @@ function updateVideoStatus() {
 
 function commandByKey(key) {
     const commands = {
+        arrowup: "forward",
+        arrowdown: "backward",
+        arrowleft: "left-forward",
+        arrowright: "right-forward",
         w: "forward",
         s: "backward",
         a: "left-forward",
@@ -850,10 +854,10 @@ function unhighlightKey(key) {
 }
 
 function getActiveCommand() {
-    if (pressedKeys.has("a")) return "left-forward";
-    if (pressedKeys.has("d")) return "right-forward";
-    if (pressedKeys.has("w")) return "forward";
-    if (pressedKeys.has("s")) return "backward";
+    if (pressedKeys.has("arrowleft") || pressedKeys.has("a")) return "left-forward";
+    if (pressedKeys.has("arrowright") || pressedKeys.has("d")) return "right-forward";
+    if (pressedKeys.has("arrowup") || pressedKeys.has("w")) return "forward";
+    if (pressedKeys.has("arrowdown") || pressedKeys.has("s")) return "backward";
     return "stop";
 }
 
@@ -940,6 +944,31 @@ function setupKeyboardControls() {
         stopCommandLoop();
         sendMotorCommand("stop");
         updateMotorStatus("stop");
+    });
+
+    document.querySelectorAll(".key-chip[data-command]").forEach((chip) => {
+        const key = chip.dataset.key;
+        const command = chip.dataset.command;
+        if (!key || !command) {
+            return;
+        }
+
+        const press = (event) => {
+            event.preventDefault();
+            handlePress(key, command);
+        };
+
+        const release = (event) => {
+            event.preventDefault();
+            handleRelease(key);
+        };
+
+        chip.addEventListener("mousedown", press);
+        chip.addEventListener("mouseup", release);
+        chip.addEventListener("mouseleave", release);
+        chip.addEventListener("touchstart", press, { passive: false });
+        chip.addEventListener("touchend", release, { passive: false });
+        chip.addEventListener("touchcancel", release, { passive: false });
     });
 }
 

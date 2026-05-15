@@ -28,6 +28,6 @@ RUN pip install --no-cache-dir -r /tmp/api_gateway.txt \
 COPY services ./services
 COPY static /static
 COPY deploy/railway_free ./deploy/railway_free
-COPY yolo11s.pt ./yolo11s.pt
+COPY yolo11n.pt ./yolo11n.pt
 
 CMD ["python", "deploy/railway_free/launcher.py"]
