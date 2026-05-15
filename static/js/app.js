@@ -139,7 +139,7 @@ function updateFlashlightUi() {
         return;
     }
 
-    button.textContent = `??????: ${flashLightEnabled ? "???" : "????"}`;
+    button.textContent = `Фонарь: ${flashLightEnabled ? "ВКЛ" : "ВЫКЛ"}`;
     button.classList.toggle("active", flashLightEnabled);
     button.classList.toggle("is-active", flashLightEnabled);
 }
@@ -1272,7 +1272,7 @@ function updateScanAutopilotButton() {
         return;
     }
 
-    button.textContent = `??????????: ${autopilotEnabled ? "???" : "????"}`;
+    button.textContent = `Автопроход: ${autopilotEnabled ? "ВКЛ" : "ВЫКЛ"}`;
     button.classList.toggle("active", autopilotEnabled);
     button.disabled = !isScanning;
 }
@@ -1360,7 +1360,7 @@ function applyScanStatus(data) {
     isScanning = Boolean(data.running);
     autopilotEnabled = isScanning && activeScanMode === "autopilot";
     updateScanAutopilotButton();
-    setText("scan-mode-text", activeScanMode === "autopilot" ? "?????: ??????????" : "?????: ??????");
+    setText("scan-mode-text", activeScanMode === "autopilot" ? "Режим: автопроход" : "Режим: ручной");
 
     if (!isScanning) {
         setText("scan-status-text", "Ожидание");
@@ -1370,7 +1370,7 @@ function applyScanStatus(data) {
     const coords = `(${data.x ?? 0}, ${data.y ?? 0})`;
     setText(
         "scan-status-text",
-        activeScanMode === "autopilot" ? `??????????: ${coords}` : `?????? ??????: ${coords}`
+        activeScanMode === "autopilot" ? `Автопроход: ${coords}` : `Ручной проход: ${coords}`
     );
 }
 
