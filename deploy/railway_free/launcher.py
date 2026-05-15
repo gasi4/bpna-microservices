@@ -79,6 +79,14 @@ def build_env(port: int, public: bool = False) -> dict[str, str]:
     env = os.environ.copy()
     env["PORT"] = str(port)
     env["HOSTNAME"] = "0.0.0.0" if public else "127.0.0.1"
+    env["AUTH_SERVICE_URL"] = "http://127.0.0.1:8001"
+    env["TELEMETRY_SERVICE_URL"] = "http://127.0.0.1:8002"
+    env["DEVICE_SERVICE_URL"] = "http://127.0.0.1:8003"
+    env["CONTROL_SERVICE_URL"] = "http://127.0.0.1:8004"
+    env["WIFI_SERVICE_URL"] = "http://127.0.0.1:8005"
+    env["DETECTION_SERVICE_URL"] = "http://127.0.0.1:8006"
+    env["DEVICE_WS_URL"] = "ws://127.0.0.1:8003"
+    env["WIFI_WS_URL"] = "ws://127.0.0.1:8005"
     database_url = derive_database_url(env)
     if database_url:
         env["DATABASE_URL"] = database_url
