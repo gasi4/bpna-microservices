@@ -1,0 +1,2 @@
+
+python fake_drone_with_camera.py --host localhost --port 8000 --device-id bpna-01 --secret change-me-device --synthetic-video
