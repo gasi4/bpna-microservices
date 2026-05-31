@@ -1,13 +1,20 @@
+from typing import Any
+
 import httpx
 
 from app.core.config import settings
 
 
-async def dispatch_command(command: str, device_id: str) -> bool:
+async def dispatch_command(command: str | dict[str, Any], device_id: str) -> bool:
+    if isinstance(command, dict):
+        payload = {"device_id": device_id, **command}
+    else:
+        payload = {"device_id": device_id, "command": command}
+
     async with httpx.AsyncClient(timeout=5) as client:
         response = await client.post(
             f"{settings.device_service_url}/internal/command",
-            json={"device_id": device_id, "command": command},
+            json=payload,
         )
     if response.status_code != 200:
         return False

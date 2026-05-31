@@ -19,6 +19,7 @@ import sys
 import time
 from dataclasses import dataclass
 from typing import Optional
+from urllib.parse import urlencode, urlparse, urlunparse
 
 import cv2
 import numpy as np
@@ -33,7 +34,35 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 DEFAULT_DEVICE_ID = "bpna-001"
-DEFAULT_DEVICE_SECRET = "JOOGmlUysuw6_l0-sIFnKCZ6ht3VCnev"
+DEFAULT_DEVICE_SECRET = "nzHqU5RkZEgGHypiCTzSeMPc3av0eizQ"
+DEFAULT_SERVER_URL = "https://bpna-production.up.railway.app/"
+LOCAL_HOSTNAMES = {"localhost", "127.0.0.1", "::1"}
+
+
+def is_local_host(host: str) -> bool:
+    raw_host = host.strip()
+    parsed = urlparse(raw_host if "://" in raw_host else f"//{raw_host}", scheme="http")
+    hostname = (parsed.hostname or raw_host).strip("[]").lower()
+    return hostname in LOCAL_HOSTNAMES
+
+
+def build_gateway_ws_url(host: str, port: Optional[int], device_id: str, secret: str) -> str:
+    raw_host = host.strip()
+    parsed = urlparse(raw_host if "://" in raw_host else f"//{raw_host}", scheme="http")
+
+    scheme = "wss" if parsed.scheme == "https" else "ws"
+    hostname = parsed.hostname or raw_host.strip("/")
+    netloc = hostname
+
+    selected_port = parsed.port or port
+    if selected_port and not (
+        (scheme == "ws" and selected_port == 80)
+        or (scheme == "wss" and selected_port == 443)
+    ):
+        netloc = f"{hostname}:{selected_port}"
+
+    query = urlencode({"device_id": device_id, "secret": secret})
+    return urlunparse((scheme, netloc, "/ws/esp", "", query, ""))
 
 
 @dataclass
@@ -53,8 +82,8 @@ class FakeDroneWithCamera:
 
     def __init__(
         self,
-        host: str = "localhost",
-        port: int = 8000,
+        host: str = DEFAULT_SERVER_URL,
+        port: Optional[int] = None,
         device_id: str = DEFAULT_DEVICE_ID,
         secret: str = DEFAULT_DEVICE_SECRET,
         camera_id: int = 0,
@@ -75,10 +104,7 @@ class FakeDroneWithCamera:
         self.jpeg_quality = jpeg_quality
         self.synthetic_video = synthetic_video
 
-        self.ws_url = (
-            f"ws://{self.host}:{self.port}/ws/esp"
-            f"?device_id={self.device_id}&secret={self.secret}"
-        )
+        self.ws_url = build_gateway_ws_url(self.host, self.port, self.device_id, self.secret)
 
         self.state = DroneState(device_id=device_id)
         self.cap: Optional[cv2.VideoCapture] = None
@@ -432,8 +458,27 @@ class FakeDroneWithCamera:
 
 async def main() -> None:
     parser = argparse.ArgumentParser(description="Stationary fake drone with camera")
-    parser.add_argument("--host", default="localhost", help="Gateway host")
-    parser.add_argument("--port", type=int, default=8000, help="Gateway port")
+    parser.add_argument(
+        "--server-url",
+        default=DEFAULT_SERVER_URL,
+        help="Gateway URL. Default: https://bpna-production.up.railway.app/",
+    )
+    parser.add_argument(
+        "--host",
+        default=None,
+        help="Deprecated gateway host override. Use --server-url for Railway.",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=None,
+        help="Gateway port. Omit it for https/wss Railway hosts.",
+    )
+    parser.add_argument(
+        "--allow-localhost",
+        action="store_true",
+        help="Allow localhost/127.0.0.1 for local debugging.",
+    )
     parser.add_argument(
         "--device-id",
         default=DEFAULT_DEVICE_ID,
@@ -462,14 +507,21 @@ async def main() -> None:
     )
 
     args = parser.parse_args()
+    gateway_host = args.host or args.server_url
+    gateway_port = args.port
+
+    if is_local_host(gateway_host) and not args.allow_localhost:
+        logger.warning(
+            "Localhost target was requested, but this emulator is configured for the cloud server. "
+            "Using %s instead. Add --allow-localhost only for local debugging.",
+            DEFAULT_SERVER_URL,
+        )
+        gateway_host = DEFAULT_SERVER_URL
+        gateway_port = None
 
     logger.info("=" * 60)
-    logger.info(
-        "Fake drone will connect to: ws://%s:%s/ws/esp?device_id=%s&secret=***",
-        args.host,
-        args.port,
-        args.device_id,
-    )
+    ws_url = build_gateway_ws_url(gateway_host, gateway_port, args.device_id, "***")
+    logger.info("Fake drone will connect to: %s", ws_url)
     logger.info("Device ID: %s", args.device_id)
     logger.info("Camera index: %s", args.camera)
     logger.info("Resolution: %sx%s", args.width, args.height)
@@ -478,8 +530,8 @@ async def main() -> None:
     logger.info("=" * 60)
 
     emulator = FakeDroneWithCamera(
-        host=args.host,
-        port=args.port,
+        host=gateway_host,
+        port=gateway_port,
         device_id=args.device_id,
         secret=args.secret,
         camera_id=args.camera,

@@ -95,7 +95,7 @@ async def telemetry_view(websocket: WebSocket, token: str = Query(...), device_i
 
 @router.post("/internal/command")
 async def internal_command(data: CommandRequest):
-    success = await send_command_to_device(data.device_id, data.command)
+    success = await send_command_to_device(data.device_id, data.websocket_payload())
     return {"success": success, "command": data.command, "device_id": data.device_id}
 
 

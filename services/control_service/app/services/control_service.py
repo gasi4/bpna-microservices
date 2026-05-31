@@ -6,11 +6,12 @@ from app.services.autopilot_state import get_autopilot_state, set_autopilot
 from app.services.control_lock import claim_lock, get_lock, heartbeat_lock, release_lock
 
 
-MOVEMENT_COMMANDS = {"forward", "backward", "left-forward", "right-forward", "stop"}
+MOVEMENT_COMMANDS = {"forward", "backward", "left-forward", "right-forward", "stop", "motor-power"}
+SCAN_STEP_COMMANDS = {"forward", "backward", "left-forward", "right-forward", "stop"}
 
 
 async def send_manual_command(data: CommandCreate, user: dict) -> CommandResponse:
-    command = data.command.value
+    command = data.command
     device_id = data.device_id
     is_movement_command = command in MOVEMENT_COMMANDS
     lock = get_lock(device_id)
@@ -32,8 +33,8 @@ async def send_manual_command(data: CommandCreate, user: dict) -> CommandRespons
             message="Autopilot is active. Disable autopilot before manual control.",
         )
 
-    success = await dispatch_command(command, device_id)
-    if success and is_movement_command:
+    success = await dispatch_command(data.device_payload(), device_id)
+    if success and command in SCAN_STEP_COMMANDS:
         await notify_scan_step(command, device_id)
     return CommandResponse(
         success=success,
