@@ -1942,15 +1942,26 @@ function commandByKey(key) {
     const commands = {
         arrowup: "forward",
         arrowdown: "backward",
-        arrowleft: "left-forward",
-        arrowright: "right-forward",
+        arrowleft: { command: "motor-power", left_power: -100, right_power: 100 },
+        arrowright: { command: "motor-power", left_power: 100, right_power: -100 },
         w: "forward",
         s: "backward",
-        a: "left-forward",
-        d: "right-forward",
+        a: { command: "motor-power", left_power: -100, right_power: 100 },
+        d: { command: "motor-power", left_power: 100, right_power: -100 },
     };
 
     return commands[key];
+}
+
+function commandName(command) {
+    return typeof command === "string" ? command : command?.command;
+}
+
+function commandPayload(deviceId, command) {
+    if (typeof command === "string") {
+        return { device_id: deviceId, command };
+    }
+    return { device_id: deviceId, ...command };
 }
 
 async function sendDeviceCommand(command) {
@@ -1961,7 +1972,7 @@ async function sendDeviceCommand(command) {
 
     const res = await apiFetch("/api/device/command", {
         method: "POST",
-        body: JSON.stringify({ device_id: deviceId, command }),
+        body: JSON.stringify(commandPayload(deviceId, command)),
     });
 
     if (!res.ok) {
@@ -2018,7 +2029,7 @@ function updateMotorStatus(command) {
     leftEl.classList.remove("active");
     rightEl.classList.remove("active");
 
-    switch (command) {
+    switch (commandName(command)) {
         case "forward":
             motorState.left = "FWD";
             motorState.right = "FWD";
@@ -2032,15 +2043,26 @@ function updateMotorStatus(command) {
             rightEl.classList.add("active");
             break;
         case "left-forward":
-            motorState.left = "FWD";
-            motorState.right = "STOP";
-            leftEl.classList.add("active");
-            break;
-        case "right-forward":
-            motorState.left = "STOP";
+            motorState.left = "BWD";
             motorState.right = "FWD";
+            leftEl.classList.add("active");
             rightEl.classList.add("active");
             break;
+        case "right-forward":
+            motorState.left = "FWD";
+            motorState.right = "BWD";
+            leftEl.classList.add("active");
+            rightEl.classList.add("active");
+            break;
+        case "motor-power": {
+            const leftPower = Number(command?.left_power || 0);
+            const rightPower = Number(command?.right_power || 0);
+            motorState.left = leftPower > 0 ? "FWD" : leftPower < 0 ? "BWD" : "STOP";
+            motorState.right = rightPower > 0 ? "FWD" : rightPower < 0 ? "BWD" : "STOP";
+            leftEl.classList.toggle("active", leftPower !== 0);
+            rightEl.classList.toggle("active", rightPower !== 0);
+            break;
+        }
         default:
             motorState.left = "STOP";
             motorState.right = "STOP";
@@ -2065,8 +2087,8 @@ function unhighlightKey(key) {
 }
 
 function getActiveCommand() {
-    if (pressedKeys.has("arrowleft") || pressedKeys.has("a")) return "left-forward";
-    if (pressedKeys.has("arrowright") || pressedKeys.has("d")) return "right-forward";
+    if (pressedKeys.has("arrowleft") || pressedKeys.has("a")) return commandByKey("arrowleft");
+    if (pressedKeys.has("arrowright") || pressedKeys.has("d")) return commandByKey("arrowright");
     if (pressedKeys.has("arrowup") || pressedKeys.has("w")) return "forward";
     if (pressedKeys.has("arrowdown") || pressedKeys.has("s")) return "backward";
     return "stop";
@@ -2099,9 +2121,10 @@ function handlePress(key, command) {
         return;
     }
 
+    const resolvedCommand = commandByKey(key) || command;
     pressedKeys.add(key);
     highlightKey(key);
-    sendMotorCommand(command);
+    sendMotorCommand(resolvedCommand);
     startCommandLoop();
 }
 

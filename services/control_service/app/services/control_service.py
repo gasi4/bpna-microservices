@@ -10,6 +10,14 @@ MOVEMENT_COMMANDS = {"forward", "backward", "left-forward", "right-forward", "st
 SCAN_STEP_COMMANDS = {"forward", "backward", "left-forward", "right-forward", "stop"}
 
 
+def device_payload_for_manual_command(data: CommandCreate) -> dict:
+    if data.command == "left-forward":
+        return {"command": "motor-power", "left_power": -100, "right_power": 100}
+    if data.command == "right-forward":
+        return {"command": "motor-power", "left_power": 100, "right_power": -100}
+    return data.device_payload()
+
+
 async def send_manual_command(data: CommandCreate, user: dict) -> CommandResponse:
     command = data.command
     device_id = data.device_id
@@ -33,7 +41,7 @@ async def send_manual_command(data: CommandCreate, user: dict) -> CommandRespons
             message="Autopilot is active. Disable autopilot before manual control.",
         )
 
-    success = await dispatch_command(data.device_payload(), device_id)
+    success = await dispatch_command(device_payload_for_manual_command(data), device_id)
     if success and command in SCAN_STEP_COMMANDS:
         await notify_scan_step(command, device_id)
     return CommandResponse(
