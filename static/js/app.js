@@ -1033,12 +1033,13 @@ function renderAdminDeviceRequests() {
         return;
     }
 
-    if (!adminDeviceRequests.length) {
+    const pendingRequests = adminDeviceRequests.filter((request) => request.status === "pending");
+    if (!pendingRequests.length) {
         root.innerHTML = '<div class="empty-state">Заявок на подключение пока нет.</div>';
         return;
     }
 
-    root.innerHTML = adminDeviceRequests.map((request) => {
+    root.innerHTML = pendingRequests.map((request) => {
         const isPending = request.status === "pending";
         const statusClass = request.status === "approved" ? "online" : request.status === "rejected" ? "offline" : "busy";
         return `

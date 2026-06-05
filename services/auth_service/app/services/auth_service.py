@@ -120,17 +120,48 @@ async def create_device(
     return device
 
 
+async def reset_onboarding_for_device(db: AsyncSession, device: Device) -> None:
+    if not device.chip_id and not device.device_id:
+        return
+
+    conditions = []
+    if device.chip_id:
+        conditions.append(DeviceOnboardingRequest.chip_id == device.chip_id)
+    if device.device_id:
+        conditions.append(DeviceOnboardingRequest.device_id == device.device_id)
+
+    for condition in conditions:
+        result = await db.execute(select(DeviceOnboardingRequest).where(condition))
+        for request in result.scalars().all():
+            if request.pairing_token_id is not None:
+                token_result = await db.execute(
+                    select(DevicePairingToken).where(DevicePairingToken.id == request.pairing_token_id)
+                )
+                token = token_result.scalar_one_or_none()
+                if token is not None and token.status in {"pending", "used"}:
+                    token.status = "revoked"
+                    token.used_at = datetime.now(timezone.utc)
+            await db.delete(request)
+
+
 async def deactivate_device(db: AsyncSession, device_id: str) -> bool:
     result = await db.execute(select(Device).where(Device.device_id == device_id))
     device = result.scalar_one_or_none()
     if device is None:
         return False
+    await reset_onboarding_for_device(db, device)
+    device.chip_id = None
     device.is_active = False
     await db.commit()
     return True
 
 
 async def delete_device(db: AsyncSession, device_id: str) -> bool:
+    device_result = await db.execute(select(Device).where(Device.device_id == device_id))
+    device = device_result.scalar_one_or_none()
+    if device is None:
+        return False
+    await reset_onboarding_for_device(db, device)
     result = await db.execute(delete(Device).where(Device.device_id == device_id))
     await db.commit()
     return bool(result.rowcount)
@@ -199,8 +230,31 @@ async def submit_onboarding_request(
             select(DevicePairingToken).where(DevicePairingToken.token == pairing_token.strip())
         )
         token = token_result.scalar_one_or_none()
-        if token is None or token.id != existing_request.pairing_token_id:
+        if token is None:
             return {"status": "rejected", "message": "Pairing token is invalid."}
+
+        if token.id != existing_request.pairing_token_id:
+            if existing_request.status in {"approved", "rejected"} and token.status == "active":
+                if existing_request.pairing_token_id is not None:
+                    old_token_result = await db.execute(
+                        select(DevicePairingToken).where(
+                            DevicePairingToken.id == existing_request.pairing_token_id
+                        )
+                    )
+                    old_token = old_token_result.scalar_one_or_none()
+                    if old_token is not None and old_token.status in {"pending", "used"}:
+                        old_token.status = "revoked"
+                        old_token.used_at = now
+
+                existing_request.status = "pending"
+                existing_request.device_id = None
+                existing_request.pairing_token_id = token.id
+                existing_request.first_seen_at = now
+                existing_request.approved_at = None
+                existing_request.rejected_at = None
+                token.status = "pending"
+            else:
+                return {"status": "rejected", "message": "Pairing token is invalid."}
 
         existing_request.last_seen_at = now
         existing_request.module_name = normalized_name
