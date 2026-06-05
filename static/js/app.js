@@ -33,6 +33,8 @@ let currentUser = null;
 let availableDevices = [];
 let adminUsers = [];
 let adminDevices = [];
+let adminDeviceRequests = [];
+let adminPairingTokens = [];
 let devicePollTimer = null;
 let controlHeartbeatTimer = null;
 let videoStreamDeviceId = null;
@@ -344,9 +346,8 @@ window.addEventListener("DOMContentLoaded", async () => {
         await createAdminUser();
     });
 
-    document.getElementById("admin-device-form")?.addEventListener("submit", async (event) => {
-        event.preventDefault();
-        await createAdminDevice();
+    document.getElementById("create-pairing-token-btn")?.addEventListener("click", async () => {
+        await createPairingToken();
     });
 
     await bootstrapApp();
@@ -620,6 +621,15 @@ function formatCreatedAt(value) {
     }
 
     return parsed.toLocaleString("ru-RU");
+}
+
+function escapeHtml(value) {
+    return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
 }
 
 function showElement(id, visible) {
@@ -974,6 +984,108 @@ function renderAdminUsers() {
     });
 }
 
+function renderPairingTokens() {
+    const root = document.getElementById("admin-pairing-tokens-list");
+    if (!root) {
+        return;
+    }
+
+    const visibleTokens = adminPairingTokens.filter((token) => token.status !== "used");
+    if (!visibleTokens.length) {
+        root.innerHTML = '<div class="empty-state">Активных кодов привязки пока нет.</div>';
+        return;
+    }
+
+    root.innerHTML = visibleTokens.map((token) => `
+        <article class="admin-list-item">
+            <div class="admin-list-row">
+                <div class="admin-list-title">
+                    <strong>Код привязки</strong>
+                    <span class="admin-list-subtitle">Создан: ${formatCreatedAt(token.created_at)}</span>
+                </div>
+                <span class="chip-status admin-account-state ${token.status === "active" ? "online" : "busy"}">${escapeHtml(token.status)}</span>
+            </div>
+            <div class="admin-list-meta">
+                <span><code>${escapeHtml(token.token)}</code></span>
+            </div>
+            ${token.status === "active" ? `
+                <div class="admin-list-actions">
+                    <button class="control-btn control-btn-danger" data-pairing-token-revoke="${token.id}">Отозвать</button>
+                </div>
+            ` : ""}
+        </article>
+    `).join("");
+
+    root.querySelectorAll("button[data-pairing-token-revoke]").forEach((button) => {
+        button.addEventListener("click", async () => {
+            const tokenId = button.dataset.pairingTokenRevoke;
+            if (!tokenId || !window.confirm("Отозвать этот код привязки?")) {
+                return;
+            }
+            await revokePairingToken(tokenId);
+        });
+    });
+}
+
+function renderAdminDeviceRequests() {
+    const root = document.getElementById("admin-device-requests-list");
+    if (!root) {
+        return;
+    }
+
+    if (!adminDeviceRequests.length) {
+        root.innerHTML = '<div class="empty-state">Заявок на подключение пока нет.</div>';
+        return;
+    }
+
+    root.innerHTML = adminDeviceRequests.map((request) => {
+        const isPending = request.status === "pending";
+        const statusClass = request.status === "approved" ? "online" : request.status === "rejected" ? "offline" : "busy";
+        return `
+            <article class="admin-list-item">
+                <div class="admin-list-row">
+                    <div class="admin-list-title">
+                        <strong>${escapeHtml(request.module_name || request.chip_id)}</strong>
+                        <span class="admin-list-subtitle">Chip ID: ${escapeHtml(request.chip_id)}</span>
+                    </div>
+                    <span class="chip-status admin-account-state ${statusClass}">${escapeHtml(request.status)}</span>
+                </div>
+                <div class="admin-list-meta">
+                    <span>Первая попытка: ${formatCreatedAt(request.first_seen_at)}</span>
+                    <span>Последняя попытка: ${formatCreatedAt(request.last_seen_at)}</span>
+                    ${request.device_id ? `<span>Device ID: ${escapeHtml(request.device_id)}</span>` : ""}
+                </div>
+                ${isPending ? `
+                    <div class="admin-list-actions">
+                        <button class="control-btn" data-device-request-approve="${request.id}">Добавить</button>
+                        <button class="control-btn control-btn-danger" data-device-request-reject="${request.id}">Отклонить</button>
+                    </div>
+                ` : ""}
+            </article>
+        `;
+    }).join("");
+
+    root.querySelectorAll("button[data-device-request-approve]").forEach((button) => {
+        button.addEventListener("click", async () => {
+            const requestId = button.dataset.deviceRequestApprove;
+            if (!requestId) {
+                return;
+            }
+            await approveDeviceRequest(requestId);
+        });
+    });
+
+    root.querySelectorAll("button[data-device-request-reject]").forEach((button) => {
+        button.addEventListener("click", async () => {
+            const requestId = button.dataset.deviceRequestReject;
+            if (!requestId || !window.confirm("Отклонить эту платформу?")) {
+                return;
+            }
+            await rejectDeviceRequest(requestId);
+        });
+    });
+}
+
 function renderAdminDevices() {
     const root = document.getElementById("admin-devices-list");
     if (!root) {
@@ -983,6 +1095,8 @@ function renderAdminDevices() {
     if (!adminDevices.length) {
         root.innerHTML = '<div class="empty-state">\u041f\u043b\u0430\u0442\u0444\u043e\u0440\u043c \u043f\u043e\u043a\u0430 \u043d\u0435\u0442.</div>';
         renderAdminOverview();
+        renderPairingTokens();
+        renderAdminDeviceRequests();
         return;
     }
 
@@ -990,17 +1104,18 @@ function renderAdminDevices() {
         <article class="admin-list-item">
             <div class="admin-list-row">
                 <div class="admin-list-title">
-                    <strong>${device.name || device.device_id}</strong>
+                    <strong>${escapeHtml(device.name || device.device_id)}</strong>
                 </div>
                 <span class="chip-status admin-account-state ${device.is_active ? "online" : "offline"}">${device.is_active ? "\u041f\u043b\u0430\u0442\u0444\u043e\u0440\u043c\u0430 \u0430\u043a\u0442\u0438\u0432\u043d\u0430" : "\u041f\u043b\u0430\u0442\u0444\u043e\u0440\u043c\u0430 \u043e\u0442\u043a\u043b\u044e\u0447\u0435\u043d\u0430"}</span>
             </div>
             <div class="admin-list-meta">
-                <span>Device ID: ${device.device_id}</span>
+                <span>Device ID: ${escapeHtml(device.device_id)}</span>
+                <span>Chip ID: ${escapeHtml(device.chip_id || "-")}</span>
                 <span>\u0421\u043e\u0437\u0434\u0430\u043d\u0430: ${formatCreatedAt(device.created_at)}</span>
-                <span>Secret: <code>${device.device_secret || "-"}</code></span>
+                <span>Secret: <code>${escapeHtml(device.device_secret || "-")}</code></span>
             </div>
             <div class="admin-list-actions">
-                <button class="control-btn control-btn-danger" data-admin-device-delete="${device.device_id}" data-admin-device-purge="${device.is_active ? "false" : "true"}">
+                <button class="control-btn control-btn-danger" data-admin-device-delete="${escapeHtml(device.device_id)}" data-admin-device-purge="${device.is_active ? "false" : "true"}">
                     ${device.is_active ? "\u0414\u0435\u0430\u043a\u0442\u0438\u0432\u0438\u0440\u043e\u0432\u0430\u0442\u044c" : "\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u0438\u0437 \u0411\u0414"}
                 </button>
             </div>
@@ -1008,6 +1123,8 @@ function renderAdminDevices() {
     `).join("");
 
     renderAdminOverview();
+    renderPairingTokens();
+    renderAdminDeviceRequests();
 
     root.querySelectorAll("button[data-admin-device-delete]").forEach((button) => {
         button.addEventListener("click", async () => {
@@ -1043,12 +1160,83 @@ async function loadAdminDevices() {
     if (!isAdminUser()) {
         return;
     }
-    const res = await apiFetch("/api/auth/admin/devices");
-    if (!res.ok) {
-        throw new Error(`Failed to load admin devices: ${res.status}`);
+    const [devicesRes, requestsRes, tokensRes] = await Promise.all([
+        apiFetch("/api/auth/admin/devices"),
+        apiFetch("/api/auth/admin/device-requests"),
+        apiFetch("/api/auth/admin/pairing-tokens"),
+    ]);
+    if (!devicesRes.ok) {
+        throw new Error(`Failed to load admin devices: ${devicesRes.status}`);
     }
-    adminDevices = await res.json();
+    if (!requestsRes.ok) {
+        throw new Error(`Failed to load device requests: ${requestsRes.status}`);
+    }
+    if (!tokensRes.ok) {
+        throw new Error(`Failed to load pairing tokens: ${tokensRes.status}`);
+    }
+    adminDevices = await devicesRes.json();
+    adminDeviceRequests = await requestsRes.json();
+    adminPairingTokens = await tokensRes.json();
     renderAdminDevices();
+}
+
+async function createPairingToken() {
+    const res = await apiFetch("/api/auth/admin/pairing-tokens", { method: "POST" });
+    if (!res.ok) {
+        window.alert("Не удалось создать код привязки.");
+        return;
+    }
+
+    const token = await res.json();
+    const secretBox = document.getElementById("admin-device-secret-box");
+    if (secretBox) {
+        secretBox.innerHTML = `
+            <strong>Код привязки создан</strong><br>
+            Введите этот код на setup-странице ESP32:<br>
+            <code>${escapeHtml(token.token)}</code>
+        `;
+        secretBox.classList.remove("hidden");
+    }
+    await loadAdminDevices();
+}
+
+async function revokePairingToken(tokenId) {
+    const res = await apiFetch(`/api/auth/admin/pairing-tokens/${encodeURIComponent(tokenId)}`, { method: "DELETE" });
+    if (!res.ok) {
+        window.alert("Не удалось отозвать код привязки.");
+        return;
+    }
+    await loadAdminDevices();
+}
+
+async function approveDeviceRequest(requestId) {
+    const res = await apiFetch(`/api/auth/admin/device-requests/${encodeURIComponent(requestId)}/approve`, { method: "POST" });
+    if (!res.ok) {
+        window.alert("Не удалось добавить платформу.");
+        return;
+    }
+    const created = await res.json();
+    const secretBox = document.getElementById("admin-device-secret-box");
+    if (secretBox) {
+        secretBox.innerHTML = `
+            <strong>Платформа добавлена</strong><br>
+            Название: <code>${escapeHtml(created.name)}</code><br>
+            Device ID: <code>${escapeHtml(created.device_id)}</code><br>
+            Secret: <code>${escapeHtml(created.device_secret)}</code>
+        `;
+        secretBox.classList.remove("hidden");
+    }
+    await loadAdminDevices();
+    await loadDevices({ preserveView: true });
+}
+
+async function rejectDeviceRequest(requestId) {
+    const res = await apiFetch(`/api/auth/admin/device-requests/${encodeURIComponent(requestId)}/reject`, { method: "POST" });
+    if (!res.ok) {
+        window.alert("Не удалось отклонить заявку.");
+        return;
+    }
+    await loadAdminDevices();
 }
 
 async function createAdminUser() {

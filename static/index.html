@@ -157,22 +157,20 @@
                         <section class="admin-card admin-card-form">
                             <div class="admin-section-head">
                                 <div>
-                                    <h3>Новая платформа</h3>
-                                    <p class="panel-note">Создайте запись устройства и получите <code>device_id</code> и секрет для прошивки.</p>
+                                    <h3>Привязка платформы</h3>
+                                    <p class="panel-note">Создайте временный код, введите его в setup-странице ESP32 и подтвердите заявку после подключения.</p>
                                 </div>
                             </div>
-                            <form id="admin-device-form" class="admin-form">
-                                <label>
-                                    <span>Название</span>
-                                    <input id="admin-device-name" type="text" placeholder="Например, Платформа 2" required>
-                                </label>
-                                <label>
-                                    <span>Device ID (необязательно)</span>
-                                    <input id="admin-device-id" type="text" placeholder="Если пусто, будет создан автоматически">
-                                </label>
-                                <button type="submit" class="control-btn">Создать платформу</button>
-                            </form>
+                            <button id="create-pairing-token-btn" class="control-btn">Создать код привязки</button>
                             <div id="admin-device-secret-box" class="admin-secret-box hidden"></div>
+                            <div id="admin-pairing-tokens-list" class="admin-list"></div>
+                            <div class="admin-section-head">
+                                <div>
+                                    <h3>Заявки</h3>
+                                    <p class="panel-note">Платформы с валидным кодом появятся здесь и будут ждать решения администратора.</p>
+                                </div>
+                            </div>
+                            <div id="admin-device-requests-list" class="admin-list"></div>
                         </section>
 
                         <section class="admin-card">

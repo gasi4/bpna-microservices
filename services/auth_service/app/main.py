@@ -6,6 +6,7 @@ from fastapi import FastAPI
 
 from app.core.database import Base, SessionLocal, engine
 from app.models import device as device_model  # noqa: F401
+from app.models import onboarding as onboarding_model  # noqa: F401
 from app.models import user as user_model  # noqa: F401
 from app.routers.admin import router as admin_router
 from app.routers.auth import router as auth_router
@@ -34,6 +35,13 @@ async def run_startup_setup() -> None:
                 )
                 await conn.exec_driver_sql(
                     "ALTER TABLE devices ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP"
+                )
+                await conn.exec_driver_sql(
+                    "ALTER TABLE devices ADD COLUMN IF NOT EXISTS chip_id VARCHAR(64)"
+                )
+                await conn.exec_driver_sql(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS ix_devices_chip_id_unique "
+                    "ON devices (chip_id) WHERE chip_id IS NOT NULL"
                 )
                 await conn.exec_driver_sql(
                     "UPDATE devices SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL"

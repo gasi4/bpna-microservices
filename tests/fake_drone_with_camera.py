@@ -33,8 +33,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-DEFAULT_DEVICE_ID = "bpna-001"
-DEFAULT_DEVICE_SECRET = "nzHqU5RkZEgGHypiCTzSeMPc3av0eizQ"
+DEFAULT_DEVICE_ID = "bpna-01"
+DEFAULT_DEVICE_SECRET = "change-me-device"
 DEFAULT_SERVER_URL = "https://bpna-production.up.railway.app/"
 LOCAL_HOSTNAMES = {"localhost", "127.0.0.1", "::1"}
 
