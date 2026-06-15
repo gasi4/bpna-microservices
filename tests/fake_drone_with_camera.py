@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_DEVICE_ID = "bpna-01"
 DEFAULT_DEVICE_SECRET = "change-me-device"
-DEFAULT_SERVER_URL = "https://bpna-production.up.railway.app/"
+DEFAULT_SERVER_URL = "http://localhost:8000/"
 LOCAL_HOSTNAMES = {"localhost", "127.0.0.1", "::1"}
 
 
@@ -50,7 +50,10 @@ def build_gateway_ws_url(host: str, port: Optional[int], device_id: str, secret:
     raw_host = host.strip()
     parsed = urlparse(raw_host if "://" in raw_host else f"//{raw_host}", scheme="http")
 
-    scheme = "wss" if parsed.scheme == "https" else "ws"
+    if parsed.scheme in {"ws", "wss"}:
+        scheme = parsed.scheme
+    else:
+        scheme = "wss" if parsed.scheme == "https" else "ws"
     hostname = parsed.hostname or raw_host.strip("/")
     netloc = hostname
 
@@ -461,12 +464,12 @@ async def main() -> None:
     parser.add_argument(
         "--server-url",
         default=DEFAULT_SERVER_URL,
-        help="Gateway URL. Default: https://bpna-production.up.railway.app/",
+        help="Gateway URL. Default: http://localhost:8000/",
     )
     parser.add_argument(
         "--host",
         default=None,
-        help="Deprecated gateway host override. Use --server-url for Railway.",
+        help="Deprecated gateway host override. Prefer --server-url.",
     )
     parser.add_argument(
         "--port",
@@ -477,7 +480,7 @@ async def main() -> None:
     parser.add_argument(
         "--allow-localhost",
         action="store_true",
-        help="Allow localhost/127.0.0.1 for local debugging.",
+        help="Deprecated. Localhost is allowed for local debugging.",
     )
     parser.add_argument(
         "--device-id",
@@ -509,15 +512,6 @@ async def main() -> None:
     args = parser.parse_args()
     gateway_host = args.host or args.server_url
     gateway_port = args.port
-
-    if is_local_host(gateway_host) and not args.allow_localhost:
-        logger.warning(
-            "Localhost target was requested, but this emulator is configured for the cloud server. "
-            "Using %s instead. Add --allow-localhost only for local debugging.",
-            DEFAULT_SERVER_URL,
-        )
-        gateway_host = DEFAULT_SERVER_URL
-        gateway_port = None
 
     logger.info("=" * 60)
     ws_url = build_gateway_ws_url(gateway_host, gateway_port, args.device_id, "***")

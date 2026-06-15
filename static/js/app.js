@@ -1942,12 +1942,12 @@ function commandByKey(key) {
     const commands = {
         arrowup: "forward",
         arrowdown: "backward",
-        arrowleft: { command: "motor-power", left_power: -100, right_power: 100 },
-        arrowright: { command: "motor-power", left_power: 100, right_power: -100 },
+        arrowleft: "left-forward",
+        arrowright: "right-forward",
         w: "forward",
         s: "backward",
-        a: { command: "motor-power", left_power: -100, right_power: 100 },
-        d: { command: "motor-power", left_power: 100, right_power: -100 },
+        a: "left-forward",
+        d: "right-forward",
     };
 
     return commands[key];
@@ -1970,13 +1970,15 @@ async function sendDeviceCommand(command) {
         return false;
     }
 
+    const payload = commandPayload(deviceId, command);
     const res = await apiFetch("/api/device/command", {
         method: "POST",
-        body: JSON.stringify(commandPayload(deviceId, command)),
+        body: JSON.stringify(payload),
     });
 
     if (!res.ok) {
-        console.error("Command failed", res.status);
+        const details = await res.text();
+        console.error("Command failed", res.status, payload, details);
         return false;
     }
 
